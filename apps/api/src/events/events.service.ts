@@ -25,7 +25,7 @@ export class EventsService {
     const apiKeyHash = sha256(apiKey);
     const project = await this.prisma.project.findUnique({
       where: { apiKeyHash },
-      select: { id: true }
+      select: { id: true, apiKeyHash: true }
     });
 
     if (!project || !safeEqualHex(project.apiKeyHash ?? "", apiKeyHash)) {
