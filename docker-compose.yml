@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: debugany-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: debugany
+      POSTGRES_USER: debugany
+      POSTGRES_PASSWORD: debugany_local_only
+    ports:
+      - "5432:5432"
+    volumes:
+      - debugany_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U debugany -d debugany"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: debugany-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - debugany_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  debugany_postgres_data:
+  debugany_redis_data:
