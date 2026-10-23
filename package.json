@@ -1,0 +1,13 @@
+{
+  "name": "debugany",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Application observability, error tracking, and debugging platform",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "check:repo": "node -e \"console.log('Debugany repository scaffold is ready for implementation.')\""
+  }
+}
