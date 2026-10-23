@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { Prisma } from "@prisma/client";
 import { CreateEventDto } from "./dto/create-event.dto";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -48,7 +49,7 @@ export class EventsService {
         environment: dto.environment ?? "production",
         release: dto.release,
         fingerprint,
-        metadata: dto.metadata as object | undefined,
+        metadata: dto.metadata as Prisma.InputJsonValue | undefined,
         occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : new Date()
       },
       select: { id: true, fingerprint: true, occurredAt: true, createdAt: true }
