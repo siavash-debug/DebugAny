@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  repository-check:
-    name: Repository scaffold check
+  validate:
+    name: Install, typecheck, and build
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -21,6 +21,19 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
-      - name: Validate package metadata
-        run: node -e "const p = require('./package.json'); if (p.name !== 'debugany') process.exit(1); console.log('Package metadata is valid.')"
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Prisma client
+        run: npm run db:generate
+
+      - name: Typecheck API and web
+        run: npm run typecheck
+
+      - name: Build API
+        run: npm run build:api
+
+      - name: Build web
+        run: npm run build:web
