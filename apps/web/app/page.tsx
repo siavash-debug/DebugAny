@@ -1,0 +1,111 @@
+import {
+  Activity, AlertTriangle, ArrowDownRight, ArrowUpRight, Bell, Check,
+  ChevronDown, CircleHelp, Clock3, Command, ExternalLink, Filter,
+  LayoutDashboard, LifeBuoy, Plus, Search, Settings2, ShieldCheck,
+  SlidersHorizontal, Sparkles, Terminal, Zap
+} from "lucide-react";
+
+const issues = [
+  { type: "error", name: "Payment provider timed out", code: "TimeoutError", service: "checkout-api", env: "production", count: "128", time: "2 min ago", status: "Unresolved" },
+  { type: "warning", name: "Failed to refresh user session", code: "AuthRefreshError", service: "web-client", env: "production", count: "46", time: "8 min ago", status: "Unresolved" },
+  { type: "error", name: "Cannot read properties of undefined", code: "TypeError", service: "dashboard-web", env: "staging", count: "19", time: "14 min ago", status: "Investigating" },
+  { type: "error", name: "Database connection pool exhausted", code: "DatabaseError", service: "users-api", env: "production", count: "8", time: "27 min ago", status: "Unresolved" }
+];
+
+const chartBars = [24, 31, 20, 42, 34, 50, 38, 28, 44, 58, 39, 31, 48, 64, 44, 36, 51, 71, 49, 40, 59, 46, 78, 55, 42, 62, 48, 35, 53, 68, 46, 57, 38, 72, 49, 61, 43, 83, 55, 47, 66, 51, 39, 59, 74, 48, 63, 42];
+
+function Logo() {
+  return <div className="brand-mark"><span className="brand-symbol"><Activity size={19} strokeWidth={2.5} /></span><span>debug<span>any</span></span></div>;
+}
+
+function Metric({ title, value, delta, positive, icon: Icon }: { title: string; value: string; delta: string; positive?: boolean; icon: typeof Activity }) {
+  return (
+    <article className="metric-card">
+      <div className="metric-top"><span>{title}</span><span className="metric-icon"><Icon size={16} /></span></div>
+      <div className="metric-value">{value}</div>
+      <div className={positive ? "metric-delta positive" : "metric-delta negative"}>{positive ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}{delta}<span> vs previous 24h</span></div>
+    </article>
+  );
+}
+
+export default function Home() {
+  return (
+    <main className="app-shell">
+      <aside className="sidebar">
+        <div className="sidebar-brand"><Logo /><span className="workspace-tag">BETA</span></div>
+        <button className="workspace-switch"><span className="workspace-avatar">S</span><span className="workspace-copy"><strong>Siavash workspace</strong><small>Free plan</small></span><ChevronDown size={15} /></button>
+        <div className="nav-label">WORKSPACE</div>
+        <nav className="nav-list">
+          <a className="nav-item active" href="#"><LayoutDashboard size={17} />Overview</a>
+          <a className="nav-item" href="#issues"><AlertTriangle size={17} />Issues<span className="nav-count">12</span></a>
+          <a className="nav-item" href="#performance"><Activity size={17} />Performance</a>
+          <a className="nav-item" href="#alerts"><Bell size={17} />Alerts</a>
+        </nav>
+        <div className="nav-label project-label">PROJECTS <button aria-label="Add project"><Plus size={14} /></button></div>
+        <a className="project-item" href="#issues"><span className="project-dot blue" />checkout-api <span className="project-env">PROD</span></a>
+        <a className="project-item" href="#issues"><span className="project-dot purple" />dashboard-web</a>
+        <a className="project-item" href="#issues"><span className="project-dot green" />users-api</a>
+        <div className="sidebar-bottom">
+          <a className="nav-item" href="#settings"><Settings2 size={17} />Settings</a>
+          <a className="nav-item" href="#help"><LifeBuoy size={17} />Help & feedback</a>
+          <div className="profile-row"><div className="profile-avatar">SS</div><div className="profile-copy"><strong>Siavash Safi</strong><small>Developer</small></div><MoreDots /></div>
+        </div>
+      </aside>
+
+      <section className="main-panel">
+        <header className="topbar">
+          <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>Overview</strong></div>
+          <div className="topbar-actions"><div className="search-box"><Search size={15} /><span>Search anything...</span><kbd><Command size={10} /> K</kbd></div><button className="icon-button" aria-label="Help"><CircleHelp size={17} /></button><button className="icon-button notification-button" aria-label="Notifications"><Bell size={17} /><i /></button><div className="top-avatar">SS</div></div>
+        </header>
+
+        <div className="content-wrap">
+          <div className="page-heading"><div><div className="eyebrow"><span className="live-dot" />SYSTEM STATUS <span className="status-divider">/</span> LAST 24 HOURS</div><h1>Good morning, Siavash <span className="wave">✳</span></h1><p>Here’s what’s happening across your applications.</p></div><button className="primary-button"><Plus size={16} /> Add project</button></div>
+
+          <div className="demo-banner"><div className="demo-icon"><Sparkles size={17} /></div><div><strong>Preview workspace</strong><span>You’re viewing illustrative sample data. Connect an application to see real events.</span></div><button>Connect an app <ExternalLink size={13} /></button></div>
+
+          <div className="metric-grid">
+            <Metric title="Total events" value="1,284" delta="12.8%" icon={Activity} />
+            <Metric title="Unresolved issues" value="12" delta="8.4%" positive icon={AlertTriangle} />
+            <Metric title="Affected users" value="86" delta="4.2%" icon={Zap} />
+            <Metric title="Avg. response time" value="184 ms" delta="16.2%" positive icon={Clock3} />
+          </div>
+
+          <div className="section-grid" id="performance">
+            <article className="panel chart-panel">
+              <div className="panel-heading"><div><h2>Event activity</h2><p>Incoming events over time</p></div><button className="select-button">Last 24 hours <ChevronDown size={14} /></button></div>
+              <div className="chart-legend"><span><i className="legend-blue" />Errors</span><span><i className="legend-purple" />Warnings</span><span className="chart-total">1,284 <small>total events</small></span></div>
+              <div className="chart-area">
+                <div className="y-labels"><span>80</span><span>60</span><span>40</span><span>20</span><span>0</span></div>
+                <div className="bar-chart">{chartBars.map((height, index) => <div key={index} className="bar-column"><span className="bar-error" style={{ height: `${height}%` }} /><span className="bar-warning" style={{ height: `${Math.max(7, height * 0.3)}%` }} /></div>)}</div>
+              </div>
+              <div className="x-labels"><span>12 AM</span><span>4 AM</span><span>8 AM</span><span>12 PM</span><span>4 PM</span><span>8 PM</span><span>Now</span></div>
+            </article>
+
+            <article className="panel health-panel">
+              <div className="panel-heading"><div><h2>Service health</h2><p>Current availability</p></div><button className="dots-button" aria-label="More options">···</button></div>
+              <div className="health-score"><div className="health-ring"><ShieldCheck size={25} /><span>99.9%</span></div><div><strong>All systems operational</strong><small><span className="live-dot" />Updated just now</small></div></div>
+              <div className="service-list">
+                <div className="service-row"><span className="service-name"><span className="service-dot green" />Checkout API</span><strong>99.98%</strong><span className="service-latency">142 ms</span></div>
+                <div className="service-row"><span className="service-name"><span className="service-dot green" />Dashboard Web</span><strong>99.95%</strong><span className="service-latency">86 ms</span></div>
+                <div className="service-row"><span className="service-name"><span className="service-dot amber" />Users API</span><strong>98.72%</strong><span className="service-latency">324 ms</span></div>
+              </div>
+              <a className="text-link" href="#services">View service details <span>→</span></a>
+            </article>
+          </div>
+
+          <section className="panel issues-panel" id="issues">
+            <div className="panel-heading issues-heading"><div><h2>Recent issues <span className="issue-count">12</span></h2><p>Errors that need your attention</p></div><div className="issue-actions"><button className="select-button"><Filter size={14} /> All environments <ChevronDown size={13} /></button><button className="select-button"><SlidersHorizontal size={14} /> Filter</button><button className="text-button">View all issues <span>→</span></button></div></div>
+            <div className="table-scroll"><table><thead><tr><th>ISSUE</th><th>PROJECT</th><th>EVENTS</th><th>LAST SEEN</th><th>STATUS</th><th /></tr></thead><tbody>{issues.map((issue) => <tr key={issue.name}><td><div className="issue-title"><span className={issue.type === "error" ? "issue-symbol error-symbol" : "issue-symbol warning-symbol"}>{issue.type === "error" ? <AlertTriangle size={14} /> : <Zap size={14} />}</span><div><strong>{issue.name}</strong><small>{issue.code}</small></div></div></td><td><span className="table-project"><span className="project-dot blue" />{issue.service}<small>{issue.env}</small></span></td><td><strong className="event-count">{issue.count}</strong></td><td className="muted-cell">{issue.time}</td><td><span className={issue.status === "Investigating" ? "status-pill investigating" : "status-pill unresolved"}><span />{issue.status}</span></td><td><button className="row-more" aria-label={`More options for ${issue.name}`}>···</button></td></tr>)}</tbody></table></div>
+            <div className="table-footer"><span>Showing <strong>4</strong> of <strong>12</strong> issues</span><button className="text-link">Explore all issues <span>→</span></button></div>
+          </section>
+
+          <footer className="page-footer"><span>© 2026 Debugany</span><span><span className="footer-status" /> All systems operational</span><a href="https://github.com/siavash-debug/DebugAny" target="_blank" rel="noreferrer">Open-source project <ExternalLink size={12} /></a></footer>
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function MoreDots() {
+  return <button className="profile-more" aria-label="Profile menu">···</button>;
+}
