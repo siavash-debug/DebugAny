@@ -2,66 +2,71 @@
 
 **Every bug. One place.**
 
-Debugany is an application observability platform for developers: error tracking, service health, performance insights, and actionable debugging workflows.
+Debugany is an early-stage application observability platform for error tracking, service health, and actionable debugging insights.
 
-> Status: early-stage project. The first API vertical slice is being implemented; production monitoring features are not complete.
+## Current status
 
-## Product vision
+The repository now contains:
+- A Next.js dashboard preview with responsive layout and illustrative sample telemetry
+- A NestJS API with a health endpoint and validated error-event ingestion
+- PostgreSQL persistence via Prisma
+- Docker Compose for local PostgreSQL and Redis
+- Initial architecture notes and CI metadata checks
 
-- **What broke?** Capture errors with useful context.
-- **How bad is it?** Track error trends and service health over time.
-- **Where should I look?** Inspect events, stack traces, releases, and alerts in one place.
+**Important:** The dashboard currently displays sample data and is not yet connected to the API. The ingestion endpoint persists events synchronously; background queue processing, authentication for dashboard users, alert delivery, and production hardening remain planned.
 
-## Planned stack
+## Stack
 
-- **Web:** Next.js, React, TypeScript
-- **API:** NestJS, TypeScript, REST
-- **Data:** PostgreSQL, Prisma
-- **Background jobs:** Redis and BullMQ
-- **Quality:** automated tests, ESLint, type checking
-- **Delivery:** Docker Compose and GitHub Actions
+- Web: Next.js, React, TypeScript
+- API: NestJS, TypeScript, REST
+- Database: PostgreSQL, Prisma
+- Background jobs (planned): Redis and BullMQ
+- Local infrastructure: Docker Compose
+- Automation: GitHub Actions
 
-## Repository layout
+## Quick start
 
-```text
-apps/
-  api/          # NestJS API and error ingestion
-  web/          # Next.js dashboard (planned)
-  worker/       # Background event processing (planned)
-packages/
-  shared/       # Shared types and contracts (planned)
-docs/           # Architecture and product decisions
-.github/
-  workflows/    # CI automation
+Requirements: Node.js 20+, npm, and Docker Compose.
+
+```bash
+cp apps/api/.env.example apps/api/.env
+docker compose up -d postgres redis
+npm install
+npm run db:generate
+npm run db:migrate
+npm run db:seed
 ```
 
-## Current implementation
+Run the API in one terminal:
 
-- Health endpoint: `GET /v1/health`
-- Project-scoped ingestion key, stored as a SHA-256 hash
-- Validated error-event payloads: `POST /v1/events`
-- PostgreSQL persistence via Prisma
-- Docker Compose services for local PostgreSQL and Redis
+```bash
+npm run dev:api
+```
 
-See [API setup instructions](apps/api/README.md) and [architecture notes](docs/architecture.md).
+Run the dashboard in another terminal:
 
-## MVP roadmap
+```bash
+npm run dev:web
+```
 
-1. [x] Define the first API vertical slice and event data model.
-2. [ ] Add project management and safer key rotation.
-3. [ ] Process events asynchronously and group issues.
-4. [ ] Build the dashboard for issues, trends, and project filters.
-5. [ ] Add issue resolution, alert rules, and notifications.
-6. [ ] Add integration tests, security checks, deployment, and a working demo.
+- Dashboard: http://localhost:3000
+- API health: http://localhost:4000/v1/health
 
-## Engineering principles
+See [API setup](apps/api/README.md), [web setup](apps/web/README.md), and [architecture notes](docs/architecture.md).
 
-- Enforce tenant/project boundaries on every dashboard query.
-- Validate and limit incoming event payloads.
-- Redact secrets and sensitive values before persistence.
-- Make background processing retry-safe and observable.
-- Measure performance in reproducible tests; do not publish unverified benchmarks.
-- Keep real secrets and customer data out of the repository.
+## Roadmap
+
+- [x] Initial data model and event ingestion endpoint
+- [x] Responsive dashboard preview
+- [ ] Connect dashboard to real API data
+- [ ] Add project management and safe key rotation
+- [ ] Process events asynchronously and group issues
+- [ ] Add issue resolution, alert rules, and notifications
+- [ ] Add integration tests, security checks, and deployment
+
+## Security
+
+This is an early development scaffold, not a production-ready monitoring service. Do not send real customer data or secrets. Validate deployment settings and security controls before exposing the API publicly.
 
 ## License
 
