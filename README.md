@@ -4,13 +4,11 @@
 
 Debugany is an application observability platform for developers: error tracking, service health, performance insights, and actionable debugging workflows.
 
-> Status: early-stage project. This repository currently contains the initial project scaffold and architecture notes; production monitoring features are not implemented yet.
+> Status: early-stage project. The first API vertical slice is being implemented; production monitoring features are not complete.
 
 ## Product vision
 
-Debugany helps developers answer three questions quickly:
-
-- **What broke?** Capture and group application errors with useful context.
+- **What broke?** Capture errors with useful context.
 - **How bad is it?** Track error trends and service health over time.
 - **Where should I look?** Inspect events, stack traces, releases, and alerts in one place.
 
@@ -23,44 +21,47 @@ Debugany helps developers answer three questions quickly:
 - **Quality:** automated tests, ESLint, type checking
 - **Delivery:** Docker Compose and GitHub Actions
 
-The initial architecture is a modular monolith with a separate web app and asynchronous worker. We will only introduce more infrastructure when there is a clear technical need.
-
 ## Repository layout
 
 ```text
 apps/
-  api/          # NestJS ingestion and product API
-  web/          # Next.js dashboard
-  worker/       # Background event processing
+  api/          # NestJS API and error ingestion
+  web/          # Next.js dashboard (planned)
+  worker/       # Background event processing (planned)
 packages/
-  shared/       # Shared types and contracts
-infra/          # Local development and deployment assets
+  shared/       # Shared types and contracts (planned)
 docs/           # Architecture and product decisions
 .github/
   workflows/    # CI automation
 ```
 
+## Current implementation
+
+- Health endpoint: `GET /v1/health`
+- Project-scoped ingestion key, stored as a SHA-256 hash
+- Validated error-event payloads: `POST /v1/events`
+- PostgreSQL persistence via Prisma
+- Docker Compose services for local PostgreSQL and Redis
+
+See [API setup instructions](apps/api/README.md) and [architecture notes](docs/architecture.md).
+
 ## MVP roadmap
 
-1. Define event contracts, data model, and architecture.
-2. Add project setup and API-key-based event ingestion.
-3. Process events asynchronously and group similar errors.
-4. Build the dashboard for issues, trends, and project filters.
-5. Add issue resolution, alert rules, and email notifications.
-6. Add tests, security checks, deployment, and a working demo.
-
-## Local development
-
-The project is being scaffolded. Setup instructions will be added as the application services become runnable. Do not put production secrets or real user data in this repository.
+1. [x] Define the first API vertical slice and event data model.
+2. [ ] Add project management and safer key rotation.
+3. [ ] Process events asynchronously and group issues.
+4. [ ] Build the dashboard for issues, trends, and project filters.
+5. [ ] Add issue resolution, alert rules, and notifications.
+6. [ ] Add integration tests, security checks, deployment, and a working demo.
 
 ## Engineering principles
 
-- Tenant isolation and least-privilege access.
-- Validate and limit all incoming event payloads.
+- Enforce tenant/project boundaries on every dashboard query.
+- Validate and limit incoming event payloads.
 - Redact secrets and sensitive values before persistence.
 - Make background processing retry-safe and observable.
 - Measure performance in reproducible tests; do not publish unverified benchmarks.
-- Document trade-offs and keep the first release intentionally small.
+- Keep real secrets and customer data out of the repository.
 
 ## License
 
