@@ -6,6 +6,11 @@ import { EventsService } from "./events.service";
 export class EventsController {
   constructor(private readonly eventsService: EventsService) {}
 
+  @Get()
+  async list(@Headers("x-debugany-key") apiKey: string | undefined) {
+    return this.eventsService.listIssues(apiKey);
+  }
+
   @Post()
   @HttpCode(HttpStatus.ACCEPTED)
   async ingest(
