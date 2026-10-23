@@ -37,45 +37,18 @@ export class EventsService {
 
   async listIssues(apiKey: string | undefined) {
     const project = await this.findProjectForKey(apiKey);
-    const [totalEvents, events] = await Promise.all([\n      this.prisma.errorEvent.count({ where: { projectId: project.id } }),\n      this.prisma.errorEvent.findMany({\n      where: { projectId: project.id },
-      orderBy: { occurredAt: "desc" },
-      take: 500,
-      select: {
-        id: true, message: true, errorType: true, stackTrace: true,
-        environment: true, release: true, fingerprint: true,
-        occurredAt: true, createdAt: true
-      }\n    })\n    ]);\n\n    const grouped = new Map<string, {
-      fingerprint: string; title: string; errorType: string; environment: string;
-      release: string | null; stackTrace: string | null; count: number;
-      firstSeen: Date; lastSeen: Date; latestEventId: string;
-    }>();
-
+    const totalEvents = await this.prisma.errorEvent.count({ where: { projectId: project.id } });
+    const events = await this.prisma.errorEvent.findMany({
+      where: { projectId: project.id }, orderBy: { occurredAt: "desc" }, take: 500,
+      select: { id: true, message: true, errorType: true, stackTrace: true, environment: true, release: true, fingerprint: true, occurredAt: true, createdAt: true }
+    });
+    const grouped = new Map<string, { fingerprint: string; title: string; errorType: string; environment: string; release: string | null; stackTrace: string | null; count: number; firstSeen: Date; lastSeen: Date; latestEventId: string }>();
     for (const event of events) {
-      const existing = grouped.get(event.fingerprint);
-      if (existing) {
-        existing.count += 1;
-        if (event.occurredAt < existing.firstSeen) existing.firstSeen = event.occurredAt;
-      } else {
-        grouped.set(event.fingerprint, {
-          fingerprint: event.fingerprint,
-          title: event.message,
-          errorType: event.errorType ?? "Error",
-          environment: event.environment,
-          release: event.release,
-          stackTrace: event.stackTrace,
-          count: 1,
-          firstSeen: event.occurredAt,
-          lastSeen: event.occurredAt,
-          latestEventId: event.id
-        });
-      }
+      const item = grouped.get(event.fingerprint);
+      if (item) { item.count += 1; if (event.occurredAt < item.firstSeen) item.firstSeen = event.occurredAt; }
+      else grouped.set(event.fingerprint, { fingerprint: event.fingerprint, title: event.message, errorType: event.errorType ?? "Error", environment: event.environment, release: event.release, stackTrace: event.stackTrace, count: 1, firstSeen: event.occurredAt, lastSeen: event.occurredAt, latestEventId: event.id });
     }
-
-    return {
-      project: { id: project.id, name: project.name, slug: project.slug },
-      totalEvents,
-      issues: [...grouped.values()].sort((a, b) => b.lastSeen.getTime() - a.lastSeen.getTime())
-    };
+    return { project: { id: project.id, name: project.name, slug: project.slug }, totalEvents, issues: [...grouped.values()].sort((a, b) => b.lastSeen.getTime() - a.lastSeen.getTime()) };
   }
 
   async ingest(apiKey: string | undefined, dto: CreateEventDto) {
