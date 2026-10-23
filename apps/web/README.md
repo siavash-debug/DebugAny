@@ -1,12 +1,16 @@
-# Web dashboard
+# Debugany Web
 
-Planned application: Next.js + TypeScript.
+Next.js dashboard preview for the Debugany observability platform.
 
-Initial screens:
-- Sign in / account
-- Projects overview
-- Project health dashboard
-- Issues list and issue detail
-- Alert settings
+## Run locally
 
-The dashboard has not been implemented yet. UI should clearly distinguish real telemetry from demo or sample data.
+From the repository root:
+
+```bash
+npm install
+npm run dev:web
+```
+
+Open http://localhost:3000.
+
+The current dashboard uses clearly labeled illustrative sample data. It is not yet connected to the API. Interactive product workflows and live telemetry will be added incrementally.
