@@ -37,18 +37,14 @@ export class EventsService {
 
   async listIssues(apiKey: string | undefined) {
     const project = await this.findProjectForKey(apiKey);
-    const events = await this.prisma.errorEvent.findMany({
-      where: { projectId: project.id },
+    const [totalEvents, events] = await Promise.all([\n      this.prisma.errorEvent.count({ where: { projectId: project.id } }),\n      this.prisma.errorEvent.findMany({\n      where: { projectId: project.id },
       orderBy: { occurredAt: "desc" },
       take: 500,
       select: {
         id: true, message: true, errorType: true, stackTrace: true,
         environment: true, release: true, fingerprint: true,
         occurredAt: true, createdAt: true
-      }
-    });
-
-    const grouped = new Map<string, {
+      }\n    })\n    ]);\n\n    const grouped = new Map<string, {
       fingerprint: string; title: string; errorType: string; environment: string;
       release: string | null; stackTrace: string | null; count: number;
       firstSeen: Date; lastSeen: Date; latestEventId: string;
@@ -77,7 +73,7 @@ export class EventsService {
 
     return {
       project: { id: project.id, name: project.name, slug: project.slug },
-      totalEvents: events.length,
+      totalEvents,
       issues: [...grouped.values()].sort((a, b) => b.lastSeen.getTime() - a.lastSeen.getTime())
     };
   }
