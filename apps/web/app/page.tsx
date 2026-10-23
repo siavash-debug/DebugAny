@@ -34,7 +34,8 @@ type DashboardIssue = {
 };
 
 async function getDashboardIssues(): Promise<{ issues: DashboardIssue[]; connected: boolean; totalEvents: number }> {
-  const baseUrl = process.env.DEBUGANY_API_URL?.replace(/\\/$/, "");
+  const configuredUrl = process.env.DEBUGANY_API_URL;
+  const baseUrl = configuredUrl?.endsWith("/") ? configuredUrl.slice(0, -1) : configuredUrl;
   const apiKey = process.env.DEBUGANY_API_KEY;
   if (!baseUrl || !apiKey) return { issues: sampleIssues, connected: false, totalEvents: 1284 };
   try {
