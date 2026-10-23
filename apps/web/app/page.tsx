@@ -5,7 +5,7 @@ import {
   SlidersHorizontal, Sparkles, Terminal, Zap
 } from "lucide-react";
 
-const issues = [
+const sampleIssues = [
   { type: "error", name: "Payment provider timed out", code: "TimeoutError", service: "checkout-api", env: "production", count: "128", time: "2 min ago", status: "Unresolved" },
   { type: "warning", name: "Failed to refresh user session", code: "AuthRefreshError", service: "web-client", env: "production", count: "46", time: "8 min ago", status: "Unresolved" },
   { type: "error", name: "Cannot read properties of undefined", code: "TypeError", service: "dashboard-web", env: "staging", count: "19", time: "14 min ago", status: "Investigating" },
@@ -28,7 +28,45 @@ function Metric({ title, value, delta, positive, icon: Icon }: { title: string; 
   );
 }
 
-export default function Home() {
+type DashboardIssue = {
+  type: string; name: string; code: string; service: string; env: string;
+  count: string; time: string; status: string;
+};
+
+async function getDashboardIssues(): Promise<{ issues: DashboardIssue[]; connected: boolean; totalEvents: number }> {
+  const baseUrl = process.env.DEBUGANY_API_URL?.replace(/\\/$/, "");
+  const apiKey = process.env.DEBUGANY_API_KEY;
+  if (!baseUrl || !apiKey) return { issues: sampleIssues, connected: false, totalEvents: 1284 };
+  try {
+    const response = await fetch(baseUrl + "/v1/events", { headers: { "x-debugany-key": apiKey }, cache: "no-store" });
+    if (!response.ok) return { issues: sampleIssues, connected: false, totalEvents: 1284 };
+    const data = await response.json() as {
+      totalEvents: number; project: { name: string; slug: string };
+      issues: Array<{ title: string; errorType: string; environment: string; count: number; lastSeen: string }>;
+    };
+    return {
+      connected: true, totalEvents: data.totalEvents,
+      issues: data.issues.slice(0, 4).map((issue) => ({
+        type: "error", name: issue.title, code: issue.errorType, service: data.project.slug,
+        env: issue.environment, count: String(issue.count), time: formatTimeAgo(issue.lastSeen), status: "Unresolved"
+      }))
+    };
+  } catch { return { issues: sampleIssues, connected: false, totalEvents: 1284 }; }
+}
+
+function formatTimeAgo(value: string): string {
+  const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
+  const minutes = Math.floor(elapsed / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return minutes + " min ago";
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours + " hr ago";
+  return Math.floor(hours / 24) + " days ago";
+}
+
+export default async function Home() {
+  const dashboard = await getDashboardIssues();
+  const issues = dashboard.issues;
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -61,7 +99,7 @@ export default function Home() {
         <div className="content-wrap">
           <div className="page-heading"><div><div className="eyebrow"><span className="live-dot" />SYSTEM STATUS <span className="status-divider">/</span> LAST 24 HOURS</div><h1>Good morning, Siavash <span className="wave">✳</span></h1><p>Here’s what’s happening across your applications.</p></div><button className="primary-button"><Plus size={16} /> Add project</button></div>
 
-          <div className="demo-banner"><div className="demo-icon"><Sparkles size={17} /></div><div><strong>Preview workspace</strong><span>You’re viewing illustrative sample data. Connect an application to see real events.</span></div><button>Connect an app <ExternalLink size={13} /></button></div>
+          <div className="demo-banner"><div className="demo-icon"><Sparkles size={17} /></div><div><strong>{dashboard.connected ? "Live project data" : "Preview workspace"}</strong><span>{dashboard.connected ? "Issue list is connected to the Debugany API. Summary charts still use preview data." : "You’re viewing illustrative sample data. Configure the API connection to see real issues."}</span></div><button>Connect an app <ExternalLink size={13} /></button></div>
 
           <div className="metric-grid">
             <Metric title="Total events" value="1,284" delta="12.8%" icon={Activity} />
@@ -73,7 +111,7 @@ export default function Home() {
           <div className="section-grid" id="performance">
             <article className="panel chart-panel">
               <div className="panel-heading"><div><h2>Event activity</h2><p>Incoming events over time</p></div><button className="select-button">Last 24 hours <ChevronDown size={14} /></button></div>
-              <div className="chart-legend"><span><i className="legend-blue" />Errors</span><span><i className="legend-purple" />Warnings</span><span className="chart-total">1,284 <small>total events</small></span></div>
+              <div className="chart-legend"><span><i className="legend-blue" />Errors</span><span><i className="legend-purple" />Warnings</span><span className="chart-total">{dashboard.connected ? dashboard.totalEvents.toLocaleString() : "1,284"} <small>{dashboard.connected ? "events received" : "sample events"}</small></span></div>
               <div className="chart-area">
                 <div className="y-labels"><span>80</span><span>60</span><span>40</span><span>20</span><span>0</span></div>
                 <div className="bar-chart">{chartBars.map((height, index) => <div key={index} className="bar-column"><span className="bar-error" style={{ height: `${height}%` }} /><span className="bar-warning" style={{ height: `${Math.max(7, height * 0.3)}%` }} /></div>)}</div>
@@ -94,9 +132,9 @@ export default function Home() {
           </div>
 
           <section className="panel issues-panel" id="issues">
-            <div className="panel-heading issues-heading"><div><h2>Recent issues <span className="issue-count">12</span></h2><p>Errors that need your attention</p></div><div className="issue-actions"><button className="select-button"><Filter size={14} /> All environments <ChevronDown size={13} /></button><button className="select-button"><SlidersHorizontal size={14} /> Filter</button><button className="text-button">View all issues <span>→</span></button></div></div>
+            <div className="panel-heading issues-heading"><div><h2>Recent issues <span className="issue-count">{dashboard.connected ? dashboard.issues.length : 12}</span></h2><p>Errors that need your attention</p></div><div className="issue-actions"><button className="select-button"><Filter size={14} /> All environments <ChevronDown size={13} /></button><button className="select-button"><SlidersHorizontal size={14} /> Filter</button><button className="text-button">View all issues <span>→</span></button></div></div>
             <div className="table-scroll"><table><thead><tr><th>ISSUE</th><th>PROJECT</th><th>EVENTS</th><th>LAST SEEN</th><th>STATUS</th><th /></tr></thead><tbody>{issues.map((issue) => <tr key={issue.name}><td><div className="issue-title"><span className={issue.type === "error" ? "issue-symbol error-symbol" : "issue-symbol warning-symbol"}>{issue.type === "error" ? <AlertTriangle size={14} /> : <Zap size={14} />}</span><div><strong>{issue.name}</strong><small>{issue.code}</small></div></div></td><td><span className="table-project"><span className="project-dot blue" />{issue.service}<small>{issue.env}</small></span></td><td><strong className="event-count">{issue.count}</strong></td><td className="muted-cell">{issue.time}</td><td><span className={issue.status === "Investigating" ? "status-pill investigating" : "status-pill unresolved"}><span />{issue.status}</span></td><td><button className="row-more" aria-label={`More options for ${issue.name}`}>···</button></td></tr>)}</tbody></table></div>
-            <div className="table-footer"><span>Showing <strong>4</strong> of <strong>12</strong> issues</span><button className="text-link">Explore all issues <span>→</span></button></div>
+            <div className="table-footer"><span>Showing <strong>{issues.length}</strong> of <strong>{dashboard.connected ? dashboard.issues.length : 12}</strong> issues</span><button className="text-link">Explore all issues <span>→</span></button></div>
           </section>
 
           <footer className="page-footer"><span>© 2026 Debugany</span><span><span className="footer-status" /> All systems operational</span><a href="https://github.com/siavash-debug/DebugAny" target="_blank" rel="noreferrer">Open-source project <ExternalLink size={12} /></a></footer>
