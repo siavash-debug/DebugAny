@@ -41,7 +41,16 @@ curl -X POST http://localhost:4000/v1/events \
   }'
 ```
 
-The endpoint returns HTTP 202 after the event is persisted. Async queue processing and issue aggregation are planned follow-up work.
+The endpoint returns HTTP 202 after the event is persisted.
+
+List recent grouped issues for a project:
+
+```bash
+curl http://localhost:4000/v1/events \\
+  -H 'x-debugany-key: YOUR_INGESTION_KEY'
+```
+
+The response includes the project, total event count, and issues grouped by fingerprint from the most recent 500 events. This is an initial implementation; durable aggregation, pagination, and async queue processing remain follow-up work.
 
 ## Security notes
 
