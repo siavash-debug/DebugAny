@@ -18,12 +18,12 @@ function Logo() {
   return <div className="brand-mark"><span className="brand-symbol"><Activity size={19} strokeWidth={2.5} /></span><span>debug<span>any</span></span></div>;
 }
 
-function Metric({ title, value, delta, positive, icon: Icon }: { title: string; value: string; delta: string; positive?: boolean; icon: typeof Activity }) {
+function Metric({ title, value, delta, positive, icon: Icon }: { title: string; value: string; delta?: string; positive?: boolean; icon: typeof Activity }) {
   return (
     <article className="metric-card">
       <div className="metric-top"><span>{title}</span><span className="metric-icon"><Icon size={16} /></span></div>
       <div className="metric-value">{value}</div>
-      <div className={positive ? "metric-delta positive" : "metric-delta negative"}>{positive ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}{delta}<span> vs previous 24h</span></div>
+      {delta ? <div className={positive ? "metric-delta positive" : "metric-delta negative"}>{positive ? <ArrowDownRight size={14} /> : <ArrowUpRight size={14} />}{delta}<span> vs previous 24h</span></div> : <div className="metric-delta"><span>{value === "—" ? "Not available yet" : "Illustrative sample"}</span></div>}
     </article>
   );
 }
@@ -33,26 +33,26 @@ type DashboardIssue = {
   count: string; time: string; status: string;
 };
 
-async function getDashboardIssues(): Promise<{ issues: DashboardIssue[]; connected: boolean; totalEvents: number }> {
+async function getDashboardIssues(): Promise<{ issues: DashboardIssue[]; connected: boolean; totalEvents: number; projectName: string; connectionMessage: string }> {
   const configuredUrl = process.env.DEBUGANY_API_URL;
   const baseUrl = configuredUrl?.endsWith("/") ? configuredUrl.slice(0, -1) : configuredUrl;
   const apiKey = process.env.DEBUGANY_API_KEY;
-  if (!baseUrl || !apiKey) return { issues: sampleIssues, connected: false, totalEvents: 1284 };
+  if (!baseUrl || !apiKey) return { issues: sampleIssues, connected: false, totalEvents: 1284, projectName: "Demo workspace", connectionMessage: "Set DEBUGANY_API_URL and DEBUGANY_API_KEY in apps/web/.env.local to load real events." };
   try {
     const response = await fetch(baseUrl + "/v1/events", { headers: { "x-debugany-key": apiKey }, cache: "no-store" });
-    if (!response.ok) return { issues: sampleIssues, connected: false, totalEvents: 1284 };
+    if (!response.ok) return { issues: sampleIssues, connected: false, totalEvents: 1284, projectName: "Demo workspace", connectionMessage: response.status === 401 ? "The API rejected the key. Check DEBUGANY_API_KEY in apps/web/.env.local." : "The API returned HTTP " + response.status + ". Showing sample data instead." };
     const data = await response.json() as {
       totalEvents: number; project: { name: string; slug: string };
       issues: Array<{ title: string; errorType: string; environment: string; count: number; lastSeen: string }>;
     };
     return {
-      connected: true, totalEvents: data.totalEvents,
+      connected: true, totalEvents: data.totalEvents, projectName: data.project.name, connectionMessage: "Connected to the Debugany API. Issue counts reflect events returned by the API.",
       issues: data.issues.slice(0, 4).map((issue) => ({
         type: "error", name: issue.title, code: issue.errorType, service: data.project.slug,
         env: issue.environment, count: String(issue.count), time: formatTimeAgo(issue.lastSeen), status: "Unresolved"
       }))
     };
-  } catch { return { issues: sampleIssues, connected: false, totalEvents: 1284 }; }
+  } catch { return { issues: sampleIssues, connected: false, totalEvents: 1284, projectName: "Demo workspace", connectionMessage: "Could not reach the API. Check that it is running and DEBUGANY_API_URL is correct." }; }
 }
 
 function formatTimeAgo(value: string): string {
@@ -76,7 +76,7 @@ export default async function Home() {
         <div className="nav-label">WORKSPACE</div>
         <nav className="nav-list">
           <a className="nav-item active" href="#"><LayoutDashboard size={17} />Overview</a>
-          <a className="nav-item" href="#issues"><AlertTriangle size={17} />Issues<span className="nav-count">12</span></a>
+          <a className="nav-item" href="#issues"><AlertTriangle size={17} />Issues<span className="nav-count">{dashboard.connected ? dashboard.issues.length : 12}</span></a>
           <a className="nav-item" href="#performance"><Activity size={17} />Performance</a>
           <a className="nav-item" href="#alerts"><Bell size={17} />Alerts</a>
         </nav>
@@ -100,19 +100,19 @@ export default async function Home() {
         <div className="content-wrap">
           <div className="page-heading"><div><div className="eyebrow"><span className="live-dot" />SYSTEM STATUS <span className="status-divider">/</span> LAST 24 HOURS</div><h1>Good morning, Siavash <span className="wave">✳</span></h1><p>Here’s what’s happening across your applications.</p></div><button className="primary-button"><Plus size={16} /> Add project</button></div>
 
-          <div className="demo-banner"><div className="demo-icon"><Sparkles size={17} /></div><div><strong>{dashboard.connected ? "Live project data" : "Preview workspace"}</strong><span>{dashboard.connected ? "Issue list is connected to the Debugany API. Summary charts still use preview data." : "You’re viewing illustrative sample data. Configure the API connection to see real issues."}</span></div><button>Connect an app <ExternalLink size={13} /></button></div>
+          <div className="demo-banner"><div className="demo-icon"><Sparkles size={17} /></div><div><strong>{dashboard.connected ? dashboard.projectName + " · Connected" : "Preview workspace"}</strong><span>{dashboard.connectionMessage}</span></div><a href="https://github.com/siavash-debug/DebugAny/blob/main/apps/web/README.md" target="_blank" rel="noreferrer">Setup guide <ExternalLink size={13} /></a></div>
 
           <div className="metric-grid">
-            <Metric title="Total events" value="1,284" delta="12.8%" icon={Activity} />
-            <Metric title="Unresolved issues" value="12" delta="8.4%" positive icon={AlertTriangle} />
-            <Metric title="Affected users" value="86" delta="4.2%" icon={Zap} />
-            <Metric title="Avg. response time" value="184 ms" delta="16.2%" positive icon={Clock3} />
+            <Metric title="Total events" value={dashboard.connected ? dashboard.totalEvents.toLocaleString() : "1,284"} delta={dashboard.connected ? undefined : "12.8%"} icon={Activity} />
+            <Metric title="Issue groups" value={dashboard.connected ? String(dashboard.issues.length) : "12"} delta={dashboard.connected ? undefined : "8.4%"} positive icon={AlertTriangle} />
+            <Metric title="Affected users" value="—" icon={Zap} />
+            <Metric title="Avg. response time" value="—" icon={Clock3} />
           </div>
 
           <div className="section-grid" id="performance">
             <article className="panel chart-panel">
-              <div className="panel-heading"><div><h2>Event activity</h2><p>Incoming events over time</p></div><button className="select-button">Last 24 hours <ChevronDown size={14} /></button></div>
-              <div className="chart-legend"><span><i className="legend-blue" />Errors</span><span><i className="legend-purple" />Warnings</span><span className="chart-total">{dashboard.connected ? dashboard.totalEvents.toLocaleString() : "1,284"} <small>{dashboard.connected ? "events received" : "sample events"}</small></span></div>
+              <div className="panel-heading"><div><h2>Event activity</h2><p>{dashboard.connected ? "Chart is illustrative; time-series API is not implemented yet." : "Sample chart · connect the API for live issue data"}</p></div><button className="select-button">Last 24 hours <ChevronDown size={14} /></button></div>
+              <div className="chart-legend"><span><i className="legend-blue" />Errors</span><span><i className="legend-purple" />Warnings</span><span className="chart-total">{dashboard.connected ? dashboard.totalEvents.toLocaleString() : "1,284"} <small>{dashboard.connected ? "events received · chart sample" : "sample events"}</small></span></div>
               <div className="chart-area">
                 <div className="y-labels"><span>80</span><span>60</span><span>40</span><span>20</span><span>0</span></div>
                 <div className="bar-chart">{chartBars.map((height, index) => <div key={index} className="bar-column"><span className="bar-error" style={{ height: `${height}%` }} /><span className="bar-warning" style={{ height: `${Math.max(7, height * 0.3)}%` }} /></div>)}</div>
@@ -122,7 +122,7 @@ export default async function Home() {
 
             <article className="panel health-panel">
               <div className="panel-heading"><div><h2>Service health</h2><p>Current availability</p></div><button className="dots-button" aria-label="More options">···</button></div>
-              <div className="health-score"><div className="health-ring"><ShieldCheck size={25} /><span>99.9%</span></div><div><strong>All systems operational</strong><small><span className="live-dot" />Updated just now</small></div></div>
+              <div className="health-score"><div className="health-ring"><ShieldCheck size={25} /><span>DEMO</span></div><div><strong>Sample service health</strong><small><span className="live-dot" />Availability monitoring is not implemented</small></div></div>
               <div className="service-list">
                 <div className="service-row"><span className="service-name"><span className="service-dot green" />Checkout API</span><strong>99.98%</strong><span className="service-latency">142 ms</span></div>
                 <div className="service-row"><span className="service-name"><span className="service-dot green" />Dashboard Web</span><strong>99.95%</strong><span className="service-latency">86 ms</span></div>
@@ -138,7 +138,7 @@ export default async function Home() {
             <div className="table-footer"><span>Showing <strong>{issues.length}</strong> of <strong>{dashboard.connected ? dashboard.issues.length : 12}</strong> issues</span><button className="text-link">Explore all issues <span>→</span></button></div>
           </section>
 
-          <footer className="page-footer"><span>© 2026 Debugany</span><span><span className="footer-status" /> All systems operational</span><a href="https://github.com/siavash-debug/DebugAny" target="_blank" rel="noreferrer">Open-source project <ExternalLink size={12} /></a></footer>
+          <footer className="page-footer"><span>© 2026 Debugany</span><span><span className="footer-status" /> {dashboard.connected ? "API connected" : "Preview mode"}</span><a href="https://github.com/siavash-debug/DebugAny" target="_blank" rel="noreferrer">Open-source project <ExternalLink size={12} /></a></footer>
         </div>
       </section>
     </main>
