@@ -40,7 +40,7 @@ async function getDashboardIssues(): Promise<{ issues: DashboardIssue[]; connect
   if (!baseUrl || !apiKey) return { issues: sampleIssues, connected: false, totalEvents: 1284, issueGroupCount: 12, projectName: "Demo workspace", connectionMessage: "Set DEBUGANY_API_URL and DEBUGANY_API_KEY in apps/web/.env.local to load real events." };
   try {
     const response = await fetch(baseUrl + "/v1/events", { headers: { "x-debugany-key": apiKey }, cache: "no-store" });
-    if (!response.ok) return { issues: sampleIssues, connected: false, totalEvents: 1284, projectName: "Demo workspace", connectionMessage: response.status === 401 ? "The API rejected the key. Check DEBUGANY_API_KEY in apps/web/.env.local." : "The API returned HTTP " + response.status + ". Showing sample data instead." };
+    if (!response.ok) return { issues: sampleIssues, connected: false, totalEvents: 1284, issueGroupCount: 12, projectName: "Demo workspace", connectionMessage: response.status === 401 ? "The API rejected the key. Check DEBUGANY_API_KEY in apps/web/.env.local." : "The API returned HTTP " + response.status + ". Showing sample data instead." };
     const data = await response.json() as {
       totalEvents: number; project: { name: string; slug: string };
       issues: Array<{ title: string; errorType: string; environment: string; count: number; lastSeen: string }>;
@@ -52,7 +52,7 @@ async function getDashboardIssues(): Promise<{ issues: DashboardIssue[]; connect
         env: issue.environment, count: String(issue.count), time: formatTimeAgo(issue.lastSeen), status: "Unresolved"
       }))
     };
-  } catch { return { issues: sampleIssues, connected: false, totalEvents: 1284, projectName: "Demo workspace", connectionMessage: "Could not reach the API. Check that it is running and DEBUGANY_API_URL is correct." }; }
+  } catch { return { issues: sampleIssues, connected: false, totalEvents: 1284, issueGroupCount: 12, projectName: "Demo workspace", connectionMessage: "Could not reach the API. Check that it is running and DEBUGANY_API_URL is correct." }; }
 }
 
 function formatTimeAgo(value: string): string {
