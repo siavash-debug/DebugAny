@@ -7,13 +7,13 @@ Debugany is an early-stage application observability platform for error tracking
 ## Current status
 
 The repository now contains:
-- A Next.js dashboard preview with responsive layout and illustrative sample telemetry
+- A Next.js dashboard with responsive UI, API-backed issue list, and clearly labeled sample-only charts/metrics
 - A NestJS API with a health endpoint and validated error-event ingestion
 - PostgreSQL persistence via Prisma
 - Docker Compose for local PostgreSQL and Redis
 - Initial architecture notes and CI metadata checks
 
-**Important:** The dashboard currently displays sample data and is not yet connected to the API. The ingestion endpoint persists events synchronously; background queue processing, authentication for dashboard users, alert delivery, and production hardening remain planned.
+**Current limitation:** The dashboard reads the issue list and total event count from the API when configured, but chart bars, service health, affected-user counts, and response-time metrics are still illustrative. The ingestion endpoint persists events synchronously; background queue processing, dashboard-user authentication, alert delivery, and production hardening remain planned.
 
 ## Stack
 
@@ -58,7 +58,8 @@ See [API setup](apps/api/README.md), [web setup](apps/web/README.md), and [archi
 
 - [x] Initial data model and event ingestion endpoint
 - [x] Responsive dashboard preview
-- [ ] Connect dashboard to real API data
+- [x] Connect dashboard issue list and total event count to the API
+- [ ] Replace sample charts and service metrics with real time-series data
 - [ ] Add project management and safe key rotation
 - [ ] Process events asynchronously and group issues
 - [ ] Add issue resolution, alert rules, and notifications
