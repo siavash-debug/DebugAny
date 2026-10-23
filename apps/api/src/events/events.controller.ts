@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, HttpCode, HttpStatus, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Post } from "@nestjs/common";
 import { CreateEventDto } from "./dto/create-event.dto";
 import { EventsService } from "./events.service";
 
