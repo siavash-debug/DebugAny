@@ -18,6 +18,7 @@ The repository now contains:
 
 ## Stack
 
+- SDK: `@debugany/sdk` TypeScript client (non-blocking capture with retries)
 - Web: Next.js, React, TypeScript
 - API: NestJS, TypeScript, REST
 - Database: PostgreSQL, Prisma
@@ -74,6 +75,7 @@ See [API setup](apps/api/README.md), [web setup](apps/web/README.md), and [archi
 - [ ] Add project management and safe key rotation
 - [ ] Process events asynchronously
 - [x] Issue resolution from the dashboard
+- [x] TypeScript SDK for capturing exceptions from applications
 - [ ] Add alert rules and notifications
 - [ ] Add dashboard-user authentication, security checks, and deployment
 

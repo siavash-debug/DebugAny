@@ -57,6 +57,9 @@ jobs:
       - name: Test API (unit and database integration)
         run: npm test
 
+      - name: Build and test SDK
+        run: npm run build:sdk
+
       - name: Build API
         run: npm run build:api
 
