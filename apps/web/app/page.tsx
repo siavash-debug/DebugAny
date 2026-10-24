@@ -4,16 +4,17 @@ import {
   LayoutDashboard, LifeBuoy, Plus, Search, Settings2, ShieldCheck,
   SlidersHorizontal, Sparkles, Terminal, Zap
 } from "lucide-react";
+import Link from "next/link";
 
 // The dashboard reads live API state (with explicit fallbacks); render it per
 // request so a production build never freezes one snapshot forever.
 export const dynamic = "force-dynamic";
 
 const sampleIssues = [
-  { type: "error", name: "Payment provider timed out", code: "TimeoutError", service: "checkout-api", env: "production", count: "128", time: "2 min ago", status: "Unresolved" },
-  { type: "warning", name: "Failed to refresh user session", code: "AuthRefreshError", service: "web-client", env: "production", count: "46", time: "8 min ago", status: "Unresolved" },
-  { type: "error", name: "Cannot read properties of undefined", code: "TypeError", service: "dashboard-web", env: "staging", count: "19", time: "14 min ago", status: "Investigating" },
-  { type: "error", name: "Database connection pool exhausted", code: "DatabaseError", service: "users-api", env: "production", count: "8", time: "27 min ago", status: "Unresolved" }
+  { id: "sample-1", type: "error", name: "Payment provider timed out", code: "TimeoutError", service: "checkout-api", env: "production", count: "128", time: "2 min ago", status: "Unresolved" },
+  { id: "sample-2", type: "warning", name: "Failed to refresh user session", code: "AuthRefreshError", service: "web-client", env: "production", count: "46", time: "8 min ago", status: "Unresolved" },
+  { id: "sample-3", type: "error", name: "Cannot read properties of undefined", code: "TypeError", service: "dashboard-web", env: "staging", count: "19", time: "14 min ago", status: "Investigating" },
+  { id: "sample-4", type: "error", name: "Database connection pool exhausted", code: "DatabaseError", service: "users-api", env: "production", count: "8", time: "27 min ago", status: "Unresolved" }
 ];
 
 const chartBars = [24, 31, 20, 42, 34, 50, 38, 28, 44, 58, 39, 31, 48, 64, 44, 36, 51, 71, 49, 40, 59, 46, 78, 55, 42, 62, 48, 35, 53, 68, 46, 57, 38, 72, 49, 61, 43, 83, 55, 47, 66, 51, 39, 59, 74, 48, 63, 42];
@@ -33,7 +34,7 @@ function Metric({ title, value, delta, note, positive, icon: Icon }: { title: st
 }
 
 type DashboardIssue = {
-  type: string; name: string; code: string; service: string; env: string;
+  id: string; type: string; name: string; code: string; service: string; env: string;
   count: string; time: string; status: string;
 };
 
@@ -47,12 +48,12 @@ async function getDashboardIssues(): Promise<{ issues: DashboardIssue[]; connect
     if (!response.ok) return { issues: sampleIssues, connected: false, totalEvents: 1284, issueGroupCount: 12, projectName: "Demo workspace", connectionMessage: response.status === 401 ? "The API rejected the key. Check DEBUGANY_API_KEY in apps/web/.env.local." : "The API returned HTTP " + response.status + ". Showing sample data instead." };
     const data = await response.json() as {
       totalEvents: number; total: number; project: { name: string; slug: string };
-      issues: Array<{ title: string; errorType: string; environment: string; count: number; status: string; lastSeenAt: string }>;
+      issues: Array<{ id: string; title: string; errorType: string; environment: string; count: number; status: string; lastSeenAt: string }>;
     };
     return {
       connected: true, totalEvents: data.totalEvents, issueGroupCount: data.total, projectName: data.project.name, connectionMessage: "Connected to the Debugany API. Counts reflect persisted events and issues.",
       issues: data.issues.slice(0, 4).map((issue) => ({
-        type: "error", name: issue.title, code: issue.errorType, service: data.project.slug,
+        id: issue.id, type: "error", name: issue.title, code: issue.errorType, service: data.project.slug,
         env: issue.environment, count: String(issue.count), time: formatTimeAgo(issue.lastSeenAt),
         status: issue.status === "RESOLVED" ? "Resolved" : issue.status === "IGNORED" ? "Ignored" : "Unresolved"
       }))
@@ -81,7 +82,7 @@ export default async function Home() {
         <div className="nav-label">WORKSPACE</div>
         <nav className="nav-list">
           <a className="nav-item active" href="#"><LayoutDashboard size={17} />Overview</a>
-          <a className="nav-item" href="#issues"><AlertTriangle size={17} />Issues<span className="nav-count">{dashboard.connected ? dashboard.issueGroupCount : 12}</span></a>
+          <Link className="nav-item" href="/issues"><AlertTriangle size={17} />Issues<span className="nav-count">{dashboard.connected ? dashboard.issueGroupCount : "—"}</span></Link>
           <a className="nav-item" href="#performance"><Activity size={17} />Performance</a>
           <a className="nav-item" href="#alerts"><Bell size={17} />Alerts</a>
         </nav>
@@ -138,9 +139,9 @@ export default async function Home() {
           </div>
 
           <section className="panel issues-panel" id="issues">
-            <div className="panel-heading issues-heading"><div><h2>Recent issues <span className="issue-count">{dashboard.connected ? dashboard.issues.length : 12}</span></h2><p>Errors that need your attention</p></div><div className="issue-actions"><button className="select-button"><Filter size={14} /> All environments <ChevronDown size={13} /></button><button className="select-button"><SlidersHorizontal size={14} /> Filter</button><button className="text-button">View all issues <span>→</span></button></div></div>
-            <div className="table-scroll"><table><thead><tr><th>ISSUE</th><th>PROJECT</th><th>EVENTS</th><th>LAST SEEN</th><th>STATUS</th><th /></tr></thead><tbody>{issues.map((issue) => <tr key={issue.name}><td><div className="issue-title"><span className={issue.type === "error" ? "issue-symbol error-symbol" : "issue-symbol warning-symbol"}>{issue.type === "error" ? <AlertTriangle size={14} /> : <Zap size={14} />}</span><div><strong>{issue.name}</strong><small>{issue.code}</small></div></div></td><td><span className="table-project"><span className="project-dot blue" />{issue.service}<small>{issue.env}</small></span></td><td><strong className="event-count">{issue.count}</strong></td><td className="muted-cell">{issue.time}</td><td><span className={issue.status === "Resolved" ? "status-pill resolved" : issue.status === "Ignored" ? "status-pill ignored" : "status-pill unresolved"}><span />{issue.status}</span></td><td><button className="row-more" aria-label={`More options for ${issue.name}`}>···</button></td></tr>)}</tbody></table></div>
-            <div className="table-footer"><span>Showing <strong>{issues.length}</strong> of <strong>{dashboard.connected ? dashboard.issueGroupCount : 12}</strong> issues</span><button className="text-link">Explore all issues <span>→</span></button></div>
+            <div className="panel-heading issues-heading"><div><h2>Recent issues <span className="issue-count">{dashboard.connected ? dashboard.issues.length : 12}</span></h2><p>Errors that need your attention</p></div><div className="issue-actions"><Link className="text-button" href="/issues">View all issues <span>→</span></Link></div></div>
+            <div className="table-scroll"><table><thead><tr><th>ISSUE</th><th>PROJECT</th><th>EVENTS</th><th>LAST SEEN</th><th>STATUS</th></tr></thead><tbody>{issues.map((issue) => <tr key={issue.name}><td><Link href={`/issues/${issue.id}`} className="issue-title"><span className={issue.type === "error" ? "issue-symbol error-symbol" : "issue-symbol warning-symbol"}>{issue.type === "error" ? <AlertTriangle size={14} /> : <Zap size={14} />}</span><div><strong>{issue.name}</strong><small>{issue.code}</small></div></Link></td><td><span className="table-project"><span className="project-dot blue" />{issue.service}<small>{issue.env}</small></span></td><td><strong className="event-count">{issue.count}</strong></td><td className="muted-cell">{issue.time}</td><td><span className={issue.status === "Resolved" ? "status-pill resolved" : issue.status === "Ignored" ? "status-pill ignored" : "status-pill unresolved"}><span />{issue.status}</span></td></tr>)}</tbody></table></div>
+            <div className="table-footer"><span>Showing <strong>{issues.length}</strong> of <strong>{dashboard.connected ? dashboard.issueGroupCount : 0}</strong> issues</span><Link className="text-link" href="/issues">Explore all issues <span>→</span></Link></div>
           </section>
 
           <footer className="page-footer"><span>© 2026 Debugany</span><span><span className="footer-status" /> {dashboard.connected ? "API connected" : "Preview mode"}</span><a href="https://github.com/siavash-debug/DebugAny" target="_blank" rel="noreferrer">Open-source project <ExternalLink size={12} /></a></footer>
