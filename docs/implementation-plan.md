@@ -81,7 +81,7 @@ Data model (`apps/api/prisma/schema.prisma`):
 - Acceptance: fresh clone + README instructions → API and dashboard run;
   `prisma migrate deploy` succeeds on empty Postgres; CI green with real checks.
 
-### Phase 2 — Real ingestion pipeline
+### Phase 2 — Real ingestion pipeline ✅ (2026-10-24)
 - `Issue` table persisted transactionally on ingest (upsert by
   `(projectId, fingerprint)`): firstSeen, lastSeen, count, status, title, errorType.
 - Fingerprinting extracted into a pure, unit-tested function.
@@ -92,7 +92,7 @@ Data model (`apps/api/prisma/schema.prisma`):
 - Acceptance: integration tests against Postgres cover ingest → grouping → list;
   malformed payloads → 400/422; unknown key → 401 without log leakage.
 
-### Phase 3 — Issue investigation experience
+### Phase 3 — Issue investigation experience ✅ (2026-10-24)
 - Issue detail endpoint: grouped event history (paginated), stack traces,
   release/environment, metadata.
 - Status transitions: resolve, reopen, ignore; audit via `updatedAt`.
@@ -101,7 +101,7 @@ Data model (`apps/api/prisma/schema.prisma`):
 - Acceptance: end-to-end flow from curl ingest → visible issue → detail page with
   real stack trace → resolve action persists.
 
-### Phase 4 — Real dashboard metrics
+### Phase 4 — Real dashboard metrics ✅ (2026-10-24)
 - Time-series endpoint (event counts bucketed by hour/day from real events).
 - Dashboard cards: total events, new/unresolved issue counts — all real.
 - Remove fabricated service health/latency/affected users; show "Not available"

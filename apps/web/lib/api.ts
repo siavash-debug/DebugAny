@@ -94,6 +94,17 @@ export interface IssueDetailResponse {
   totalEvents: number;
 }
 
+export interface MetricsOverview {
+  project: { id: string; name: string; slug: string };
+  windowHours: number;
+  totalEvents: number;
+  newIssues: number;
+  unresolved: number;
+  totalIssues: number;
+  topIssues: Array<Pick<ApiIssue, "id" | "title" | "errorType" | "status" | "count" | "lastSeenAt">>;
+  series: Array<{ bucket: string; count: number }>;
+}
+
 export function listIssues(params: {
   status?: string;
   environment?: string;
@@ -112,6 +123,10 @@ export function listIssues(params: {
 
 export function getIssue(id: string, limit: number, offset: number): Promise<ApiResult<IssueDetailResponse>> {
   return apiFetch<IssueDetailResponse>(`/v1/issues/${encodeURIComponent(id)}?limit=${limit}&offset=${offset}`);
+}
+
+export function getMetricsOverview(windowHours: number): Promise<ApiResult<MetricsOverview>> {
+  return apiFetch<MetricsOverview>(`/v1/metrics/overview?windowHours=${windowHours}`);
 }
 
 export function updateIssueStatus(id: string, status: "UNRESOLVED" | "RESOLVED" | "IGNORED"): Promise<ApiResult<ApiIssue>> {

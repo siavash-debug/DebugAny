@@ -3,10 +3,11 @@ import { CorrelationIdMiddleware } from "./common/correlation-id.middleware";
 import { EventsModule } from "./events/events.module";
 import { HealthController } from "./health.controller";
 import { IssuesModule } from "./issues/issues.module";
+import { MetricsModule } from "./metrics/metrics.module";
 import { PrismaModule } from "./prisma/prisma.module";
 
 @Module({
-  imports: [PrismaModule, EventsModule, IssuesModule],
+  imports: [PrismaModule, EventsModule, IssuesModule, MetricsModule],
   controllers: [HealthController]
 })
 export class AppModule implements NestModule {

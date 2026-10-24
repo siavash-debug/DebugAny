@@ -7,14 +7,14 @@ Debugany is an early-stage application observability platform for error tracking
 ## Current status
 
 The repository now contains:
-- A Next.js dashboard with responsive UI, API-backed issue list, and clearly labeled sample-only charts/metrics
-- A NestJS API with health/readiness endpoints, validated error-event ingestion, structured error responses, and correlation IDs
+- A Next.js dashboard with real issue investigation pages (list, detail, resolve/reopen/ignore) and fully API-backed metrics
+- A NestJS API with health/readiness endpoints, transactional error-event ingestion into durable issues, paginated/filterable issue queries, a metrics overview endpoint, structured error responses, and correlation IDs
 - PostgreSQL persistence via Prisma with versioned migrations
 - Vitest unit tests plus database-backed integration tests
 - Docker Compose for local PostgreSQL and Redis
 - CI that installs, migrates, typechecks, tests, and builds
 
-**Current limitation:** The dashboard reads the issue list and total event count from the API when configured, but chart bars, service health, affected-user counts, and response-time metrics are still illustrative. Issues are grouped on read from the most recent 500 events; durable issue records, background queue processing, dashboard-user authentication, alert delivery, and production hardening remain planned. See [docs/implementation-plan.md](docs/implementation-plan.md).
+**Current limitation:** Every number on the dashboard comes from the API; fabricated service-health/latency/affected-user metrics were removed. Ingestion is synchronous (no queue yet), the dashboard uses a single project ingestion key (no user accounts), and alert delivery is not implemented. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 ## Stack
 
@@ -69,11 +69,12 @@ See [API setup](apps/api/README.md), [web setup](apps/web/README.md), and [archi
 - [x] Responsive dashboard preview
 - [x] Connect dashboard issue list and total event count to the API
 - [x] Versioned migrations, readiness probe, structured errors, and CI tests
-- [ ] Persist issues with durable grouping, status, and pagination
-- [ ] Replace sample charts and service metrics with real time-series data
+- [x] Persisted issues with durable grouping, status, and pagination
+- [x] Real time-series and issue metrics on the dashboard (no simulated data)
 - [ ] Add project management and safe key rotation
 - [ ] Process events asynchronously
-- [ ] Add issue resolution, alert rules, and notifications
+- [x] Issue resolution from the dashboard
+- [ ] Add alert rules and notifications
 - [ ] Add dashboard-user authentication, security checks, and deployment
 
 ## Security
