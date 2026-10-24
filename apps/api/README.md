@@ -52,16 +52,34 @@ curl -X POST http://localhost:4000/v1/events \
   }'
 ```
 
-The endpoint returns HTTP 202 after the event is persisted.
+The endpoint returns HTTP 202 after the event **and its issue aggregate are committed** in one transaction — a 202 always means the event is durably stored. Matching events (same error type, message, and first three stack frames) are grouped into a persisted issue; a RESOLVED issue reopens when the same error recurs.
 
-List recent grouped issues for a project:
+List issues (paginated and filterable):
 
 ```bash
-curl http://localhost:4000/v1/events \\
+curl "http://localhost:4000/v1/issues?status=UNRESOLVED&limit=25&offset=0" \
   -H 'x-debugany-key: YOUR_INGESTION_KEY'
 ```
 
-The response includes the project, total event count, and issues grouped by fingerprint from the most recent 500 events. This is an initial implementation; durable aggregation, pagination, and async queue processing remain follow-up work.
+Query parameters: `status` (`UNRESOLVED` | `RESOLVED` | `IGNORED`), `environment`, `search` (case-insensitive title match), `limit` (1–100, default 25), `offset`, `since`, `until` (ISO timestamps on `lastSeenAt`). The response includes `total`, `totalEvents`, and the project.
+
+Issue detail with grouped event history:
+
+```bash
+curl "http://localhost:4000/v1/issues/ISSUE_ID?limit=25&offset=0" \
+  -H 'x-debugany-key: YOUR_INGESTION_KEY'
+```
+
+Change issue status:
+
+```bash
+curl -X PATCH "http://localhost:4000/v1/issues/ISSUE_ID/status" \
+  -H 'content-type: application/json' \
+  -H 'x-debugany-key: YOUR_INGESTION_KEY' \
+  -d '{"status": "RESOLVED"}'
+```
+
+Accepted statuses: `UNRESOLVED`, `RESOLVED`, `IGNORED`. Issues from another project are never reachable — every query is scoped to the authenticated ingestion key's project.
 
 ## Tests
 

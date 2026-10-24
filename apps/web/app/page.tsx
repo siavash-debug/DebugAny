@@ -43,17 +43,18 @@ async function getDashboardIssues(): Promise<{ issues: DashboardIssue[]; connect
   const apiKey = process.env.DEBUGANY_API_KEY;
   if (!baseUrl || !apiKey) return { issues: sampleIssues, connected: false, totalEvents: 1284, issueGroupCount: 12, projectName: "Demo workspace", connectionMessage: "Set DEBUGANY_API_URL and DEBUGANY_API_KEY in apps/web/.env.local to load real events." };
   try {
-    const response = await fetch(baseUrl + "/v1/events", { headers: { "x-debugany-key": apiKey }, cache: "no-store" });
+    const response = await fetch(baseUrl + "/v1/issues?limit=25", { headers: { "x-debugany-key": apiKey }, cache: "no-store" });
     if (!response.ok) return { issues: sampleIssues, connected: false, totalEvents: 1284, issueGroupCount: 12, projectName: "Demo workspace", connectionMessage: response.status === 401 ? "The API rejected the key. Check DEBUGANY_API_KEY in apps/web/.env.local." : "The API returned HTTP " + response.status + ". Showing sample data instead." };
     const data = await response.json() as {
-      totalEvents: number; project: { name: string; slug: string };
-      issues: Array<{ title: string; errorType: string; environment: string; count: number; lastSeen: string }>;
+      totalEvents: number; total: number; project: { name: string; slug: string };
+      issues: Array<{ title: string; errorType: string; environment: string; count: number; status: string; lastSeenAt: string }>;
     };
     return {
-      connected: true, totalEvents: data.totalEvents, issueGroupCount: data.issues.length, projectName: data.project.name, connectionMessage: "Connected to the Debugany API. Issue counts reflect events returned by the API.",
+      connected: true, totalEvents: data.totalEvents, issueGroupCount: data.total, projectName: data.project.name, connectionMessage: "Connected to the Debugany API. Counts reflect persisted events and issues.",
       issues: data.issues.slice(0, 4).map((issue) => ({
         type: "error", name: issue.title, code: issue.errorType, service: data.project.slug,
-        env: issue.environment, count: String(issue.count), time: formatTimeAgo(issue.lastSeen), status: "Unresolved"
+        env: issue.environment, count: String(issue.count), time: formatTimeAgo(issue.lastSeenAt),
+        status: issue.status === "RESOLVED" ? "Resolved" : issue.status === "IGNORED" ? "Ignored" : "Unresolved"
       }))
     };
   } catch { return { issues: sampleIssues, connected: false, totalEvents: 1284, issueGroupCount: 12, projectName: "Demo workspace", connectionMessage: "Could not reach the API. Check that it is running and DEBUGANY_API_URL is correct." }; }
@@ -138,7 +139,7 @@ export default async function Home() {
 
           <section className="panel issues-panel" id="issues">
             <div className="panel-heading issues-heading"><div><h2>Recent issues <span className="issue-count">{dashboard.connected ? dashboard.issues.length : 12}</span></h2><p>Errors that need your attention</p></div><div className="issue-actions"><button className="select-button"><Filter size={14} /> All environments <ChevronDown size={13} /></button><button className="select-button"><SlidersHorizontal size={14} /> Filter</button><button className="text-button">View all issues <span>→</span></button></div></div>
-            <div className="table-scroll"><table><thead><tr><th>ISSUE</th><th>PROJECT</th><th>EVENTS</th><th>LAST SEEN</th><th>STATUS</th><th /></tr></thead><tbody>{issues.map((issue) => <tr key={issue.name}><td><div className="issue-title"><span className={issue.type === "error" ? "issue-symbol error-symbol" : "issue-symbol warning-symbol"}>{issue.type === "error" ? <AlertTriangle size={14} /> : <Zap size={14} />}</span><div><strong>{issue.name}</strong><small>{issue.code}</small></div></div></td><td><span className="table-project"><span className="project-dot blue" />{issue.service}<small>{issue.env}</small></span></td><td><strong className="event-count">{issue.count}</strong></td><td className="muted-cell">{issue.time}</td><td><span className={issue.status === "Investigating" ? "status-pill investigating" : "status-pill unresolved"}><span />{issue.status}</span></td><td><button className="row-more" aria-label={`More options for ${issue.name}`}>···</button></td></tr>)}</tbody></table></div>
+            <div className="table-scroll"><table><thead><tr><th>ISSUE</th><th>PROJECT</th><th>EVENTS</th><th>LAST SEEN</th><th>STATUS</th><th /></tr></thead><tbody>{issues.map((issue) => <tr key={issue.name}><td><div className="issue-title"><span className={issue.type === "error" ? "issue-symbol error-symbol" : "issue-symbol warning-symbol"}>{issue.type === "error" ? <AlertTriangle size={14} /> : <Zap size={14} />}</span><div><strong>{issue.name}</strong><small>{issue.code}</small></div></div></td><td><span className="table-project"><span className="project-dot blue" />{issue.service}<small>{issue.env}</small></span></td><td><strong className="event-count">{issue.count}</strong></td><td className="muted-cell">{issue.time}</td><td><span className={issue.status === "Resolved" ? "status-pill resolved" : issue.status === "Ignored" ? "status-pill ignored" : "status-pill unresolved"}><span />{issue.status}</span></td><td><button className="row-more" aria-label={`More options for ${issue.name}`}>···</button></td></tr>)}</tbody></table></div>
             <div className="table-footer"><span>Showing <strong>{issues.length}</strong> of <strong>{dashboard.connected ? dashboard.issueGroupCount : 12}</strong> issues</span><button className="text-link">Explore all issues <span>→</span></button></div>
           </section>
 
