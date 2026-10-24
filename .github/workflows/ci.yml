@@ -49,7 +49,7 @@ jobs:
         run: npm run db:generate
 
       - name: Apply database migrations
-        run: npx prisma migrate deploy --workspace @debugany/api
+        run: npm run prisma:deploy --workspace @debugany/api
 
       - name: Typecheck API and web
         run: npm run typecheck
