@@ -11,8 +11,27 @@ permissions:
 
 jobs:
   validate:
-    name: Install, typecheck, and build
+    name: Install, typecheck, test, and build
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: debugany
+          POSTGRES_USER: debugany
+          POSTGRES_PASSWORD: debugany_ci_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U debugany -d debugany"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://debugany:debugany_ci_only@localhost:5432/debugany?schema=public
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -21,15 +40,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
       - name: Generate Prisma client
         run: npm run db:generate
 
+      - name: Apply database migrations
+        run: npx prisma migrate deploy --workspace @debugany/api
+
       - name: Typecheck API and web
         run: npm run typecheck
+
+      - name: Test API (unit and database integration)
+        run: npm test
 
       - name: Build API
         run: npm run build:api

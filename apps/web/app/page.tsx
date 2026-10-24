@@ -5,6 +5,10 @@ import {
   SlidersHorizontal, Sparkles, Terminal, Zap
 } from "lucide-react";
 
+// The dashboard reads live API state (with explicit fallbacks); render it per
+// request so a production build never freezes one snapshot forever.
+export const dynamic = "force-dynamic";
+
 const sampleIssues = [
   { type: "error", name: "Payment provider timed out", code: "TimeoutError", service: "checkout-api", env: "production", count: "128", time: "2 min ago", status: "Unresolved" },
   { type: "warning", name: "Failed to refresh user session", code: "AuthRefreshError", service: "web-client", env: "production", count: "46", time: "8 min ago", status: "Unresolved" },

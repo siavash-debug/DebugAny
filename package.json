@@ -19,6 +19,7 @@
     "typecheck:api": "npm run typecheck --workspace @debugany/api",
     "typecheck:web": "npm run typecheck --workspace @debugany/web",
     "typecheck": "npm run typecheck:api && npm run typecheck:web",
+    "test": "npm run test --workspace @debugany/api",
     "db:generate": "npm run prisma:generate --workspace @debugany/api",
     "db:migrate": "npm run prisma:migrate --workspace @debugany/api",
     "db:seed": "npm run prisma:seed --workspace @debugany/api",

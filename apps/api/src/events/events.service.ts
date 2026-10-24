@@ -1,8 +1,10 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { Injectable, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, Injectable, UnauthorizedException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
-import { CreateEventDto } from "./dto/create-event.dto";
 import { PrismaService } from "../prisma/prisma.service";
+import { buildEventFingerprint } from "./event-fingerprint";
+import { CreateEventDto } from "./dto/create-event.dto";
+import { sanitizeMetadata } from "./sanitize-metadata";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
@@ -52,37 +54,29 @@ export class EventsService {
   }
 
   async ingest(apiKey: string | undefined, dto: CreateEventDto) {
-    if (!apiKey || apiKey.length > 256) {
-      throw new UnauthorizedException("A valid x-debugany-key header is required.");
+    const project = await this.findProjectForKey(apiKey);
+
+    const sanitized = sanitizeMetadata(dto.metadata);
+    if (!sanitized.accepted) {
+      throw new BadRequestException(sanitized.reason);
     }
 
-    const apiKeyHash = sha256(apiKey);
-    const project = await this.prisma.project.findUnique({
-      where: { apiKeyHash },
-      select: { id: true, apiKeyHash: true }
+    const fingerprint = buildEventFingerprint({
+      message: dto.message,
+      errorType: dto.errorType,
+      stackTrace: dto.stackTrace
     });
-
-    if (!project || !safeEqualHex(project.apiKeyHash ?? "", apiKeyHash)) {
-      throw new UnauthorizedException("Invalid ingestion key.");
-    }
-
-    const normalizedMessage = dto.message.trim().replace(/\s+/g, " ");
-    const fingerprint = sha256([
-      dto.errorType?.trim() ?? "Error",
-      normalizedMessage,
-      (dto.stackTrace ?? "").split("\n").slice(0, 3).join("\n")
-    ].join("|"));
 
     const event = await this.prisma.errorEvent.create({
       data: {
         projectId: project.id,
-        message: normalizedMessage,
+        message: dto.message.trim().replace(/\s+/g, " "),
         errorType: dto.errorType,
         stackTrace: dto.stackTrace,
         environment: dto.environment ?? "production",
         release: dto.release,
         fingerprint,
-        metadata: dto.metadata as Prisma.InputJsonValue | undefined,
+        metadata: sanitized.metadata as Prisma.InputJsonValue,
         occurredAt: dto.occurredAt ? new Date(dto.occurredAt) : new Date()
       },
       select: { id: true, fingerprint: true, occurredAt: true, createdAt: true }
