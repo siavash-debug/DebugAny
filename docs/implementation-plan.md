@@ -109,7 +109,7 @@ Data model (`apps/api/prisma/schema.prisma`):
 - Acceptance: no number on the dashboard without a real data source or explicit
   "unavailable" label.
 
-### Phase 5 — Projects and authentication
+### Phase 5 — Projects and authentication (remaining — next up)
 - Dashboard user auth (email+password with Argon2/bcrypt, httpOnly session
   cookies), project CRUD scoped to users, per-project ingestion keys with
   generate/revoke/rotate and hash-only storage.
@@ -118,14 +118,14 @@ Data model (`apps/api/prisma/schema.prisma`):
 - Acceptance: two users cannot see each other's projects; revoked keys fail
   ingestion immediately.
 
-### Phase 6 — Background processing and alerts
+### Phase 6 — Background processing and alerts (remaining)
 - BullMQ worker consuming ingestion (queue-then-persist with bounded retries and
   dead-letter handling) once synchronous ingestion proves insufficient; alert
   rules on new-issue/frequency thresholds; webhook adapter with SSRF protection.
 - Acceptance: retry/backoff tests; failed jobs inspectable; no notifications sent
   without explicit configuration.
 
-### Phase 7 — SDK
+### Phase 7 — SDK ✅ (2026-10-24)
 - `packages/sdk`: TypeScript client (ingestion key + endpoint, captureException,
   release/environment tags, explicit flush, bounded retries, payload caps,
   never blocks the host app). Example app + docs.
