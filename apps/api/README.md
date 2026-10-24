@@ -24,7 +24,18 @@ npm run dev:api
 
 The seed command creates a demo project and prints its ingestion key once. Keep that key private.
 
-Health check: `GET http://localhost:4000/v1/health`
+The API loads `apps/api/.env` automatically (the seed script does too), so exporting `DATABASE_URL` by hand is not required.
+
+Health: `GET http://localhost:4000/v1/health` (liveness)
+Readiness: `GET http://localhost:4000/v1/health/ready` (pings the database; returns 503 when it is down)
+
+Every failed request returns a consistent envelope with a correlation id that is also sent back as the `x-request-id` response header, e.g.:
+
+```json
+{ "statusCode": 401, "error": "UNAUTHORIZED", "message": "Invalid ingestion key.", "correlationId": "…", "timestamp": "…" }
+```
+
+Ingestion bodies are limited to 64 KB. Metadata is recursively redacted for sensitive-looking keys (`password`, `token`, `apiKey`, …) and capped at 8 KB; oversized metadata is rejected with HTTP 400.
 
 Ingest an event:
 
@@ -41,16 +52,42 @@ curl -X POST http://localhost:4000/v1/events \
   }'
 ```
 
-The endpoint returns HTTP 202 after the event is persisted.
+The endpoint returns HTTP 202 after the event **and its issue aggregate are committed** in one transaction — a 202 always means the event is durably stored. Matching events (same error type, message, and first three stack frames) are grouped into a persisted issue; a RESOLVED issue reopens when the same error recurs.
 
-List recent grouped issues for a project:
+List issues (paginated and filterable):
 
 ```bash
-curl http://localhost:4000/v1/events \\
+curl "http://localhost:4000/v1/issues?status=UNRESOLVED&limit=25&offset=0" \
   -H 'x-debugany-key: YOUR_INGESTION_KEY'
 ```
 
-The response includes the project, total event count, and issues grouped by fingerprint from the most recent 500 events. This is an initial implementation; durable aggregation, pagination, and async queue processing remain follow-up work.
+Query parameters: `status` (`UNRESOLVED` | `RESOLVED` | `IGNORED`), `environment`, `search` (case-insensitive title match), `limit` (1–100, default 25), `offset`, `since`, `until` (ISO timestamps on `lastSeenAt`). The response includes `total`, `totalEvents`, and the project.
+
+Issue detail with grouped event history:
+
+```bash
+curl "http://localhost:4000/v1/issues/ISSUE_ID?limit=25&offset=0" \
+  -H 'x-debugany-key: YOUR_INGESTION_KEY'
+```
+
+Change issue status:
+
+```bash
+curl -X PATCH "http://localhost:4000/v1/issues/ISSUE_ID/status" \
+  -H 'content-type: application/json' \
+  -H 'x-debugany-key: YOUR_INGESTION_KEY' \
+  -d '{"status": "RESOLVED"}'
+```
+
+Accepted statuses: `UNRESOLVED`, `RESOLVED`, `IGNORED`. Issues from another project are never reachable — every query is scoped to the authenticated ingestion key's project.
+
+## Tests
+
+```bash
+npm test        # from the repo root
+```
+
+Unit tests for fingerprinting and metadata redaction always run. Integration tests exercise the real ingestion flow against Postgres when `DATABASE_URL` points at a reachable database (the local Docker instance or CI's service container) and are skipped otherwise.
 
 ## Security notes
 

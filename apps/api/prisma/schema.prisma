@@ -8,19 +8,52 @@ datasource db {
 }
 
 model Project {
-  id          String      @id @default(cuid())
+  id          String       @id @default(cuid())
   name        String
-  slug        String      @unique
-  apiKeyHash  String      @unique
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
+  slug        String       @unique
+  apiKeyHash  String       @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
   events      ErrorEvent[]
+  issues      Issue[]
+}
+
+enum IssueStatus {
+  UNRESOLVED
+  RESOLVED
+  IGNORED
+}
+
+model Issue {
+  id          String       @id @default(cuid())
+  projectId   String
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fingerprint String       @db.VarChar(64)
+  title       String       @db.VarChar(2000)
+  errorType   String       @db.VarChar(200)
+  environment String       @default("production") @db.VarChar(80)
+  release     String?      @db.VarChar(160)
+  stackTrace  String?      @db.Text
+  status      IssueStatus  @default(UNRESOLVED)
+  count       Int          @default(1)
+  firstSeenAt DateTime
+  lastSeenAt  DateTime
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  events      ErrorEvent[]
+
+  @@unique([projectId, fingerprint])
+  @@index([projectId, status, lastSeenAt])
+  @@index([projectId, environment, lastSeenAt])
+  @@index([projectId, lastSeenAt])
 }
 
 model ErrorEvent {
   id          String   @id @default(cuid())
   projectId   String
   project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  issueId     String?
+  issue       Issue?   @relation(fields: [issueId], references: [id], onDelete: SetNull)
   message     String   @db.VarChar(2000)
   errorType   String?  @db.VarChar(200)
   stackTrace  String?  @db.Text
@@ -34,4 +67,5 @@ model ErrorEvent {
   @@index([projectId, createdAt])
   @@index([projectId, fingerprint])
   @@index([projectId, environment, occurredAt])
+  @@index([issueId, occurredAt])
 }
