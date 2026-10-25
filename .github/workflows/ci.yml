@@ -15,6 +15,16 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
       postgres:
         image: postgres:16-alpine
         env:
@@ -31,6 +41,8 @@ jobs:
 
     env:
       DATABASE_URL: postgresql://debugany:debugany_ci_only@localhost:5432/debugany?schema=public
+      REDIS_URL: redis://localhost:6379
+      DEBUGANY_ENCRYPTION_KEY: AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=
 
     steps:
       - name: Check out repository
