@@ -17,6 +17,8 @@ model Project {
   issues      Issue[]
   members     ProjectMember[]
   keys        IngestionKey[]
+  alertRules  AlertRule[]
+  webhooks    WebhookEndpoint[]
 }
 
 model User {
@@ -72,6 +74,75 @@ model IngestionKey {
   revokedAt    DateTime?
 
   @@index([projectId])
+}
+
+enum AlertRuleType {
+  NEW_ISSUE
+  NEW_ISSUE_MATCHING
+  ISSUE_THRESHOLD
+  ERROR_RATE
+}
+
+model AlertRule {
+  id               String        @id @default(cuid())
+  projectId        String
+  project          Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name             String        @db.VarChar(120)
+  type             AlertRuleType
+  config           Json
+  enabled          Boolean       @default(true)
+  cooldownMinutes  Int           @default(60)
+  webhookId        String?
+  lastTriggeredAt  DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([projectId, enabled])
+}
+
+model WebhookEndpoint {
+  id        String            @id @default(cuid())
+  projectId String
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String?           @db.VarChar(120)
+  url       String            @db.VarChar(2000)
+  secretEnc String            @db.Text
+  enabled   Boolean           @default(true)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+  deliveries WebhookDelivery[]
+
+  @@index([projectId])
+}
+
+enum DeliveryStatus {
+  PENDING
+  DELIVERED
+  FAILED
+}
+
+model WebhookDelivery {
+  id            String         @id @default(cuid())
+  endpointId    String
+  endpoint      WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  projectId     String
+  alertRuleId   String?
+  dedupeKey     String         @unique
+  payload       Json
+  status        DeliveryStatus @default(PENDING)
+  attempts      Int            @default(0)
+  responseStatus Int?
+  error         String?        @db.VarChar(500)
+  createdAt     DateTime       @default(now())
+  deliveredAt   DateTime?
+
+  @@index([endpointId, createdAt])
+}
+
+model ProcessedJob {
+  id        String   @id @default(cuid())
+  jobId     String   @unique
+  createdAt DateTime @default(now())
 }
 
 model AuditLog {
