@@ -8,13 +8,13 @@ Debugany is an early-stage application observability platform for error tracking
 
 The repository now contains:
 - A Next.js dashboard behind user authentication (Argon2id passwords, httpOnly server-side sessions) with project switching, ingestion-key management, issue investigation pages, and fully API-backed metrics
-- A NestJS API with user accounts and DB-backed sessions, project membership with owner/member roles, revocable per-project ingestion keys (hash at rest), transactional error-event ingestion into durable issues, paginated/filterable issue queries, a metrics overview endpoint, rate-limited auth endpoints, an audit log, and structured error responses
+- A NestJS API with user accounts and DB-backed sessions, project membership with owner/member roles, revocable per-project ingestion keys (hash at rest), transactional error-event ingestion into durable issues (inline or via BullMQ queue), alert rules with cooldowns, signed webhook deliveries with SSRF protections, paginated/filterable issue queries, a metrics overview endpoint, rate-limited auth endpoints, an audit log, and structured error responses
 - PostgreSQL persistence via Prisma with versioned migrations
 - Vitest unit tests plus database-backed integration tests
 - Docker Compose for local PostgreSQL and Redis
 - CI that installs, migrates, typechecks, tests, and builds
 
-**Current limitation:** Every number on the dashboard comes from the API; fabricated metrics were removed. Users cannot invite collaborators yet (members are added via the API for now), ingestion is synchronous (no queue), and alert delivery is not implemented. See [docs/implementation-plan.md](docs/implementation-plan.md).
+**Current limitation:** Every number on the dashboard comes from the API; fabricated metrics were removed. Users cannot invite collaborators yet (members are added via the API for now), queue delivery is at-least-once (not exactly-once), webhook destinations must be publicly resolvable at creation time, and email notifications are not implemented (webhooks only). See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 ## Stack
 
@@ -48,11 +48,19 @@ npm test          # unit tests; integration tests run when Postgres is reachable
 npm run typecheck # strict typecheck of API and dashboard
 ```
 
-Run the API in one terminal:
+Run the API in one terminal (add `DEBUGANY_INGESTION_MODE_QUEUE=true` to apps/api/.env to enqueue events):
 
 ```bash
 npm run dev:api
 ```
+
+Run the background worker in another terminal (processes queued events and webhook deliveries):
+
+```bash
+npm run dev:worker
+```
+
+Webhook delivery requires `DEBUGANY_ENCRYPTION_KEY` in apps/api/.env (generate with `openssl rand -base64 32`).
 
 Run the dashboard in another terminal:
 

@@ -4,7 +4,7 @@ import { AuthService } from "../src/auth/auth.service";
 import { ProjectsService } from "../src/projects/projects.service";
 import { AuditService } from "../src/audit/audit.service";
 import { IssuesService } from "../src/issues/issues.service";
-import { EventsService } from "../src/events/events.service";
+import { IngestionCoreService } from "../src/events/ingestion-core.service";
 import { IngestionKeyGuard } from "../src/auth/ingestion-key.guard";
 import { createUser, createProjectOwnedBy, type TestUser } from "./helpers";
 import type { ProjectRef } from "../src/auth/ingestion-key.guard";
@@ -13,6 +13,9 @@ import type { ProjectRef } from "../src/auth/ingestion-key.guard";
 // lifecycle, tenant isolation, and audit records against real Postgres.
 const databaseUrl = process.env.DATABASE_URL;
 const describeIntegration = databaseUrl ? describe : describe.skip;
+
+// Queue stub: tests run in sync ingestion mode, so the queue is never used.
+
 
 function guardRequest(projectRef: ProjectRef | undefined, headers: Record<string, string | string[]>) {
   return {
@@ -27,7 +30,7 @@ describeIntegration("phase 5: auth, projects, keys, isolation (integration)", ()
   let auth: AuthService;
   let projects: ProjectsService;
   let issues: IssuesService;
-  let events: EventsService;
+  let core: IngestionCoreService;
   let guard: IngestionKeyGuard;
   let alice: TestUser;
   let bob: TestUser;
@@ -40,12 +43,12 @@ describeIntegration("phase 5: auth, projects, keys, isolation (integration)", ()
     auth = new AuthService(prisma);
     projects = new ProjectsService(prisma, audit);
     issues = new IssuesService(prisma, audit);
-    events = new EventsService(prisma);
+    core = new IngestionCoreService(prisma);
     guard = new IngestionKeyGuard(prisma);
   });
 
   afterAll(async () => {
-    await prisma.user.deleteMany({ where: { email: { endsWith: "@test.debugany.local" } } });
+    await prisma.user.deleteMany({ where: { email: { startsWith: "p5-" } } });
     await prisma.$disconnect();
   });
 
@@ -102,8 +105,8 @@ describeIntegration("phase 5: auth, projects, keys, isolation (integration)", ()
   });
 
   it("creates projects with the creator as OWNER and lists only their projects", async () => {
-    alice = await createUser(prisma, "alice");
-    bob = await createUser(prisma, "bob");
+    alice = await createUser(prisma, "p5-alice");
+    bob = await createUser(prisma, "p5-bob");
     aliceProject = await projects.create(alice.user, {
       name: "Alice Console",
       slug: `alice-${Math.random().toString(36).slice(2, 10)}`
@@ -182,10 +185,11 @@ describeIntegration("phase 5: auth, projects, keys, isolation (integration)", ()
   });
 
   it("scopes issues, events, and metrics to the owning project", async () => {
-    const ingested = await events.ingest(aliceProject, {
+    const ingested = await core.processEvent(aliceProject, {
       message: "isolation probe",
-      errorType: "IsoError"
-    });
+      errorType: "IsoError",
+      occurredAt: new Date().toISOString()
+    }, `iso-job-${Date.now()}`);
     const bobProject = await projects.create(bob.user, {
       name: "Bob Project",
       slug: `bob-${Math.random().toString(36).slice(2, 10)}`

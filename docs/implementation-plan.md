@@ -139,7 +139,43 @@ Data model (`apps/api/prisma/schema.prisma`):
   invitations UI yet, sessions not sliding (fixed 30d), no password reset
   flow (needs email delivery), audit log has no viewer UI.
 
-### Phase 6 — Background processing and alerts (remaining)
+### Phase 6 — Background processing and alerts ✅ (2026-10-25) — delivered
+- Ingestion queue: POST /v1/events accepts inline (default) or enqueues via
+  BullMQ (DEBUGANY_INGESTION_MODE_QUEUE=true); Redis outages degrade to
+  synchronous persistence (never silently drop). Delivery guarantee:
+  at-least-once with per-job idempotency (ProcessedJob marker written
+  atomically before aggregates; failed jobs release it for retries) — NOT
+  exactly-once.
+- Worker process (DEBUGANY_WORKER=true): consumes events + webhook delivery
+  queues, graceful shutdown (waits for active jobs), /v1/worker/health
+  counters, bounded exponential backoff (5 attempts) with failed jobs kept
+  inspectable in BullMQ.
+- Alert rules: NEW_ISSUE, NEW_ISSUE_MATCHING (title/fingerprint filter),
+  ISSUE_THRESHOLD, ERROR_RATE (window 5–1440 min), per-rule cooldown,
+  optional webhook targeting, validated configs; evaluated in the worker on
+  real persisted data; evaluation failures never break ingestion.
+- Duplicate suppression: per-trigger dedupe key (unique) on deliveries plus
+  cooldown timestamps; repeated evaluation cannot double-notify.
+- Webhooks: project-scoped endpoints; signing secrets AES-256-GCM encrypted
+  at rest (DEBUGANY_ENCRYPTION_KEY) and shown once; payloads signed with
+  HMAC-SHA256 + timestamp (replay-verifiable, tolerance check helper);
+  bounded 10s timeout, 3 attempts with backoff; per-delivery status tracking
+  and history API.
+- SSRF: http(s) + ports 80/443 only; blocklist covers loopback, private,
+  CGNAT, link-local (cloud metadata), benchmark, multicast, IPv6 ULA/
+  link-local/multicast, IPv4-mapped IPv6; DNS resolved per hop (redirects
+  followed max 3, each re-validated) with a pinned connect-time lookup to
+  defeat DNS rebinding. Creation-time validation requires the host to
+  resolve (fail-closed) — documented operational consideration.
+- Dashboard: settings gains alert-rule and webhook management with delivery
+  history; fixed a server-render cookie-write crash found during E2E.
+- Remaining risks/limits: in-memory rate limiting is per-instance (needs
+  Redis-backed storage for multi-instance); delivery retries are in-process
+  (a worker crash mid-delivery loses that attempt, the row stays PENDING);
+  no email channel; webhook targets must resolve DNS at creation; audit log
+  has no viewer; no delivery requeue API yet.
+
+### Phase 6 — (previous notes)
 - BullMQ worker consuming ingestion (queue-then-persist with bounded retries and
   dead-letter handling) once synchronous ingestion proves insufficient; alert
   rules on new-issue/frequency thresholds; webhook adapter with SSRF protection.

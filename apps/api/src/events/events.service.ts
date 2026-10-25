@@ -1,102 +1,73 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
-import { IssueStatus, Prisma } from "@prisma/client";
+import { Inject, Injectable, Logger } from "@nestjs/common";
+import { randomUUID } from "node:crypto";
+import type { Queue } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 import type { ProjectRef } from "../auth/ingestion-key.guard";
-import { buildEventFingerprint } from "./event-fingerprint";
 import { CreateEventDto } from "./dto/create-event.dto";
-import { sanitizeMetadata } from "./sanitize-metadata";
+import { EVENTS_QUEUE_TOKEN, EventJobData } from "../queue/queue.module";
+import { env } from "../config/env";
+import { IngestionCoreService } from "./ingestion-core.service";
+
+/**
+ * Ingestion entry point.
+ *
+ * Delivery guarantees:
+ * - sync mode (default): the event is persisted transactionally before the
+ *   202 is sent; HTTP 202 means stored.
+ * - queue mode (DEBUGANY_INGESTION_MODE_QUEUE=true): 202 means the job is
+ *   durably enqueued in Redis (BullMQ persists jobs); the worker persists it
+ *   at-least-once with per-job idempotency, so retries never duplicate events
+ *   or issue counts. This is at-least-once, not exactly-once.
+ * - if Redis is unavailable in queue mode, the API falls back to synchronous
+ *   persistence so accepted events are never silently dropped; the response
+ *   reports which path was taken.
+ */
+export type IngestResponse =
+  | { accepted: true; event: { id: string; occurredAt: Date; createdAt: Date }; issue: { id: string; fingerprint: string; firstSeenAt: Date } }
+  | { accepted: true; queued: true; jobId: string }
+  | { accepted: true; queued: false; degraded: true; event: { id: string; occurredAt: Date; createdAt: Date }; issue: { id: string } };
 
 @Injectable()
 export class EventsService {
-  constructor(private readonly prisma: PrismaService) {}
+  private readonly logger = new Logger(EventsService.name);
 
-  /**
-   * Persists the event and its issue aggregate in one transaction. The response
-   * is only sent once the transaction commits, so an HTTP 202 always means the
-   * event is durably stored.
-   *
-   * Grouping rules:
-   * - matching fingerprint → same issue; count and lastSeenAt advance
-   * - the issue title/errorType/stack reflect the latest event
-   * - a RESOLVED issue reopens when the same error occurs again; IGNORED stays
-   */
-  async ingest(project: ProjectRef, dto: CreateEventDto) {
-    const sanitized = sanitizeMetadata(dto.metadata);
-    if (!sanitized.accepted) {
-      throw new BadRequestException(sanitized.reason);
-    }
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly core: IngestionCoreService,
+    @Inject(EVENTS_QUEUE_TOKEN) private readonly eventsQueue: Queue<EventJobData>
+  ) {}
 
-    const fingerprint = buildEventFingerprint({
+  async ingest(project: ProjectRef, dto: CreateEventDto): Promise<IngestResponse> {
+    const input = {
       message: dto.message,
       errorType: dto.errorType,
-      stackTrace: dto.stackTrace
-    });
+      stackTrace: dto.stackTrace,
+      environment: dto.environment,
+      release: dto.release,
+      occurredAt: (dto.occurredAt ? new Date(dto.occurredAt) : new Date()).toISOString(),
+      metadata: dto.metadata
+    };
 
-    const occurredAt = dto.occurredAt ? new Date(dto.occurredAt) : new Date();
-    const message = dto.message.trim().replace(/\s+/g, " ");
-    const errorType = dto.errorType ?? "Error";
-
-    const result = await this.prisma.$transaction(async (tx) => {
-      const issue = await tx.issue.upsert({
-        where: { projectId_fingerprint: { projectId: project.id, fingerprint } },
-        create: {
-          projectId: project.id,
-          fingerprint,
-          title: message,
-          errorType,
-          environment: dto.environment ?? "production",
-          release: dto.release,
-          stackTrace: dto.stackTrace,
-          count: 1,
-          firstSeenAt: occurredAt,
-          lastSeenAt: occurredAt
-        },
-        update: {
-          title: message,
-          errorType,
-          environment: dto.environment ?? "production",
-          release: dto.release,
-          stackTrace: dto.stackTrace,
-          count: { increment: 1 },
-          lastSeenAt: occurredAt
-        },
-        select: { id: true, status: true, firstSeenAt: true }
-      });
-
-      const event = await tx.errorEvent.create({
-        data: {
-          projectId: project.id,
-          issueId: issue.id,
-          message,
-          errorType: dto.errorType,
-          stackTrace: dto.stackTrace,
-          environment: dto.environment ?? "production",
-          release: dto.release,
-          fingerprint,
-          metadata: sanitized.metadata as Prisma.InputJsonValue,
-          occurredAt
-        },
-        select: { id: true, occurredAt: true, createdAt: true }
-      });
-
-      if (issue.status === IssueStatus.RESOLVED) {
-        await tx.issue.update({
-          where: { id: issue.id },
-          data: { status: IssueStatus.UNRESOLVED }
-        });
+    if (env.ingestionViaQueue) {
+      const jobId = randomUUID();
+      try {
+        await this.eventsQueue.add("event", { jobId, project, event: input }, { jobId });
+        return { accepted: true, queued: true, jobId };
+      } catch (error) {
+        // Redis outage: degrade to synchronous persistence rather than drop.
+        this.logger.error(
+          `Queue unavailable, persisting synchronously: ${error instanceof Error ? error.message : error}`
+        );
+        const result = await this.core.processEvent(project, input, jobId);
+        return { accepted: true, queued: false, degraded: true, event: result.event, issue: { id: result.issue.id } };
       }
+    }
 
-      return { issue, event };
-    });
-
+    const result = await this.core.processEvent(project, input, randomUUID());
     return {
       accepted: true,
       event: result.event,
-      issue: {
-        id: result.issue.id,
-        fingerprint,
-        firstSeenAt: result.issue.firstSeenAt
-      }
+      issue: { id: result.issue.id, fingerprint: result.issue.fingerprint, firstSeenAt: result.issue.firstSeenAt }
     };
   }
 }
