@@ -1,9 +1,8 @@
 import Link from "next/link";
 import {
-  Activity, AlertTriangle, ExternalLink, LayoutDashboard, LifeBuoy, Plus
+  Activity, AlertTriangle, ExternalLink, LayoutDashboard, LifeBuoy, LogOut, Plus, Settings
 } from "lucide-react";
 import {
-  apiConnectionMessage,
   getMetricsOverview,
   listIssues,
   type ApiIssue,
@@ -11,13 +10,21 @@ import {
   type ApiState,
   type MetricsOverview
 } from "../lib/api";
+import { requireWorkspace } from "../lib/workspace";
+import { logoutAction } from "../actions/auth";
+import { switchProjectAction } from "../actions/workspace";
+import { ProjectCreateForm } from "./project-create-form";
 
 // The dashboard reads live API state (with explicit fallbacks); render it per
 // request so a production build never freezes one snapshot forever.
 export const dynamic = "force-dynamic";
 
 function StateBanner({ state }: { state: ApiState }) {
-  const title = state.kind === "unconfigured" ? "Dashboard not connected" : "API unavailable";
+  const title = state.kind === "unauthorized"
+    ? "Session expired"
+    : state.kind === "unconfigured"
+      ? "Dashboard not connected"
+      : "API unavailable";
   return (
     <div className="demo-banner">
       <div><strong>{title}</strong><span>{state.message}</span></div>
@@ -78,11 +85,15 @@ function firstFailureState(...results: Array<ApiResult<unknown>>): ApiState {
 }
 
 export default async function Home() {
-  const [issuesResult, metricsResult] = await Promise.all([listIssues({ limit: 4 }), getMetricsOverview(24)]);
-  const connected = issuesResult.ok && metricsResult.ok;
-  const metrics = metricsResult.ok ? metricsResult.data : undefined;
-  const issues = issuesResult.ok ? issuesResult.data.issues : [];
-  const projectName = connected ? metrics!.project.name : undefined;
+  const workspace = await requireWorkspace();
+  const projectId = workspace.active?.id;
+
+  const [issuesResult, metricsResult] = projectId
+    ? await Promise.all([listIssues(projectId, { limit: 4 }), getMetricsOverview(projectId, 24)])
+    : [undefined, undefined];
+  const connected = Boolean(projectId) && issuesResult?.ok === true && metricsResult?.ok === true;
+  const metrics = metricsResult?.ok ? metricsResult.data : undefined;
+  const issues = issuesResult?.ok ? issuesResult.data.issues : [];
 
   const latestBucket = metrics?.series.at(-1)?.bucket;
   const earliestBucket = metrics?.series[0]?.bucket;
@@ -94,94 +105,124 @@ export default async function Home() {
         <div className="sidebar-brand">
           <div className="brand-mark"><span className="brand-symbol"><Activity size={19} strokeWidth={2.5} /></span><span>debug<span>any</span></span></div>
         </div>
+
         <div className="nav-label">WORKSPACE</div>
         <nav className="nav-list">
           <span className="nav-item active"><LayoutDashboard size={17} />Overview</span>
           <Link className="nav-item" href="/issues"><AlertTriangle size={17} />Issues<span className="nav-count">{connected ? metrics!.totalIssues : "—"}</span></Link>
+          {workspace.active && (
+            <Link className="nav-item" href="/settings"><Settings size={17} />Settings</Link>
+          )}
         </nav>
-        {connected && (
-          <>
-            <div className="nav-label project-label">PROJECT</div>
-            <span className="project-item"><span className="project-dot blue" />{projectName}</span>
-          </>
-        )}
+
+        <div className="nav-label project-label">PROJECTS</div>
+        <nav className="project-list">
+          {workspace.projects.map((project) => (
+            <form key={project.id} action={switchProjectAction}>
+              <input type="hidden" name="projectId" value={project.id} />
+              <button type="submit" className={"project-item" + (project.id === projectId ? " active" : "")}>
+                <span className="project-dot blue" />{project.name}
+              </button>
+            </form>
+          ))}
+          {workspace.projects.length === 0 && <span className="project-item muted">No projects yet</span>}
+        </nav>
+        <ProjectCreateForm />
+
         <div className="sidebar-bottom">
           <a className="nav-item" href="https://github.com/siavash-debug/DebugAny" target="_blank" rel="noreferrer"><LifeBuoy size={17} />Help &amp; feedback</a>
+          <div className="profile-row">
+            <div className="profile-avatar">{workspace.user.name.slice(0, 2).toUpperCase()}</div>
+            <div className="profile-copy"><strong>{workspace.user.name || "Signed in"}</strong><small>{workspace.user.email || ""}</small></div>
+            <form action={logoutAction}><button className="profile-more" type="submit" aria-label="Sign out"><LogOut size={14} /></button></form>
+          </div>
         </div>
       </aside>
 
       <section className="main-panel">
         <header className="topbar">
-          <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>Overview</strong></div>
+          <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>{workspace.active?.name ?? "Overview"}</strong></div>
         </header>
 
         <div className="content-wrap">
           <div className="page-heading"><div><div className="eyebrow"><span className="live-dot" />SYSTEM STATUS <span className="status-divider">/</span> LAST {metrics?.windowHours ?? 24} HOURS</div><h1>Overview</h1><p>Real metrics from the Debugany API — nothing on this page is simulated.</p></div><Link className="primary-button" href="/issues"><Plus size={16} /> View issues</Link></div>
 
-          {!connected && <StateBanner state={firstFailureState(issuesResult, metricsResult)} />}
+          {!projectId && (
+            <div className="empty-state panel">
+              <AlertTriangle size={22} />
+              <strong>No projects yet</strong>
+              <span>Create your first project to start tracking errors. You will get an ingestion key to wire up the SDK.</span>
+            </div>
+          )}
 
-          <div className="metric-grid">
-            <Metric title={`Events · last ${metrics?.windowHours ?? 24}h`} value={connected ? metrics!.totalEvents.toLocaleString() : "—"} note={connected ? "Received by the API" : "Connect the API to see real counts"} />
-            <Metric title="Issue groups" value={connected ? metrics!.totalIssues.toLocaleString() : "—"} note={connected ? "All statuses" : undefined} />
-            <Metric title={`New issues · last ${metrics?.windowHours ?? 24}h`} value={connected ? metrics!.newIssues.toLocaleString() : "—"} note={connected ? "First seen in window" : undefined} />
-            <Metric title="Unresolved issues" value={connected ? metrics!.unresolved.toLocaleString() : "—"} note={connected ? "Awaiting resolution" : undefined} />
-          </div>
+          {projectId && !connected && <StateBanner state={firstFailureState(issuesResult!, metricsResult!)} />}
 
-          <div className="section-grid" id="performance">
-            <article className="panel chart-panel">
-              <div className="panel-heading"><div><h2>Event activity</h2><p>{connected ? `Hourly event counts · ${earliestBucket?.slice(0, 16)} → ${latestBucket?.slice(0, 16)} UTC` : "Connect the API to see real event activity"}</p></div></div>
-              {connected && eventsInWindow > 0 ? (
-                <>
-                  <div className="chart-legend"><span><i className="legend-blue" />Events per hour</span><span className="chart-total">{eventsInWindow.toLocaleString()} <small>events in window</small></span></div>
-                  <HourChart series={metrics!.series} />
-                  <div className="x-labels"><span>{earliestBucket?.slice(11, 16)} UTC</span><span>{latestBucket?.slice(11, 16)} UTC</span></div>
-                </>
-              ) : (
-                <div className="empty-state">
-                  <Activity size={22} />
-                  <strong>{connected ? "No events in this window" : "No data yet"}</strong>
-                  <span>{connected ? "Send an event with your ingestion key and it will appear here within the hour." : apiConnectionMessage()}</span>
-                </div>
-              )}
-            </article>
-
-            <article className="panel health-panel">
-              <div className="panel-heading"><div><h2>Top issues</h2><p>Most recurring error groups</p></div></div>
-              {connected && metrics!.topIssues.length > 0 ? (
-                <div className="service-list">
-                  {metrics!.topIssues.map((issue) => (
-                    <Link key={issue.id} href={`/issues/${issue.id}`} className="service-row">
-                      <span className="service-name"><span className={issue.status === "RESOLVED" ? "service-dot green" : "service-dot amber"} />{issue.title}</span>
-                      <strong>{issue.count.toLocaleString()}</strong>
-                      <span className="service-latency">{formatTimeAgo(issue.lastSeenAt)}</span>
-                    </Link>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty-state">
-                  <AlertTriangle size={22} />
-                  <strong>{connected ? "No issues recorded yet" : "Not connected"}</strong>
-                  <span>{connected ? "Ingest events to start grouping errors into issues." : apiConnectionMessage()}</span>
-                </div>
-              )}
-            </article>
-          </div>
-
-          <section className="panel issues-panel" id="issues">
-            <div className="panel-heading issues-heading"><div><h2>Recent issues <span className="issue-count">{connected ? issues.length : 0}</span></h2><p>Newest activity across all issue groups</p></div><div className="issue-actions"><Link className="text-button" href="/issues">View all issues <span>→</span></Link></div></div>
-            {issues.length === 0 ? (
-              <div className="empty-state">
-                <AlertTriangle size={22} />
-                <strong>{connected ? "No issues yet" : "Issues are unavailable"}</strong>
-                <span>{connected ? "Ingest an event with your project's ingestion key and grouped issues will appear here." : apiConnectionMessage()}</span>
+          {projectId && connected && (
+            <>
+              <div className="metric-grid">
+                <Metric title={`Events · last ${metrics!.windowHours}h`} value={metrics!.totalEvents.toLocaleString()} note="Received by the API" />
+                <Metric title="Issue groups" value={metrics!.totalIssues.toLocaleString()} note="All statuses" />
+                <Metric title={`New issues · last ${metrics!.windowHours}h`} value={metrics!.newIssues.toLocaleString()} note="First seen in window" />
+                <Metric title="Unresolved issues" value={metrics!.unresolved.toLocaleString()} note="Awaiting resolution" />
               </div>
-            ) : (
-              <div className="table-scroll"><table><thead><tr><th>ISSUE</th><th>EVENTS</th><th>ENV</th><th>LAST SEEN</th><th>STATUS</th></tr></thead><tbody>{issues.map((issue) => <tr key={issue.id}><td><Link href={`/issues/${issue.id}`} className="issue-title"><span className="issue-symbol error-symbol"><AlertTriangle size={14} /></span><div><strong>{issue.title}</strong><small>{issue.errorType}</small></div></Link></td><td><strong className="event-count">{issue.count}</strong></td><td className="muted-cell">{issue.environment}</td><td className="muted-cell">{formatTimeAgo(issue.lastSeenAt)}</td><td><span className={statusClass(issue.status)}><span />{statusLabel(issue.status)}</span></td></tr>)}</tbody></table></div>
-            )}
-            <div className="table-footer"><span>Showing <strong>{issues.length}</strong> of <strong>{connected ? metrics!.totalIssues : 0}</strong> issues</span><Link className="text-link" href="/issues">Explore all issues <span>→</span></Link></div>
-          </section>
 
-          <footer className="page-footer"><span>© 2026 Debugany</span><span><span className="footer-status" /> {connected ? `API connected · ${projectName}` : "Preview mode"}</span><a href="https://github.com/siavash-debug/DebugAny" target="_blank" rel="noreferrer">Open-source project <ExternalLink size={12} /></a></footer>
+              <div className="section-grid" id="performance">
+                <article className="panel chart-panel">
+                  <div className="panel-heading"><div><h2>Event activity</h2><p>Hourly event counts · {earliestBucket?.slice(0, 16)} → {latestBucket?.slice(0, 16)} UTC</p></div></div>
+                  {eventsInWindow > 0 ? (
+                    <>
+                      <div className="chart-legend"><span><i className="legend-blue" />Events per hour</span><span className="chart-total">{eventsInWindow.toLocaleString()} <small>events in window</small></span></div>
+                      <HourChart series={metrics!.series} />
+                      <div className="x-labels"><span>{earliestBucket?.slice(11, 16)} UTC</span><span>{latestBucket?.slice(11, 16)} UTC</span></div>
+                    </>
+                  ) : (
+                    <div className="empty-state">
+                      <Activity size={22} />
+                      <strong>No events in this window</strong>
+                      <span>Send an event with your project&apos;s ingestion key and it will appear here within the hour.</span>
+                    </div>
+                  )}
+                </article>
+
+                <article className="panel health-panel">
+                  <div className="panel-heading"><div><h2>Top issues</h2><p>Most recurring error groups</p></div></div>
+                  {metrics!.topIssues.length > 0 ? (
+                    <div className="service-list">
+                      {metrics!.topIssues.map((issue) => (
+                        <Link key={issue.id} href={`/issues/${issue.id}`} className="service-row">
+                          <span className="service-name"><span className={issue.status === "RESOLVED" ? "service-dot green" : "service-dot amber"} />{issue.title}</span>
+                          <strong>{issue.count.toLocaleString()}</strong>
+                          <span className="service-latency">{formatTimeAgo(issue.lastSeenAt)}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty-state">
+                      <AlertTriangle size={22} />
+                      <strong>No issues recorded yet</strong>
+                      <span>Ingest events to start grouping errors into issues.</span>
+                    </div>
+                  )}
+                </article>
+              </div>
+
+              <section className="panel issues-panel" id="issues">
+                <div className="panel-heading issues-heading"><div><h2>Recent issues <span className="issue-count">{issues.length}</span></h2><p>Newest activity across all issue groups</p></div><div className="issue-actions"><Link className="text-button" href="/issues">View all issues <span>→</span></Link></div></div>
+                {issues.length === 0 ? (
+                  <div className="empty-state">
+                    <AlertTriangle size={22} />
+                    <strong>No issues yet</strong>
+                    <span>Ingest an event with your project&apos;s ingestion key and grouped issues will appear here.</span>
+                  </div>
+                ) : (
+                  <div className="table-scroll"><table><thead><tr><th>ISSUE</th><th>EVENTS</th><th>ENV</th><th>LAST SEEN</th><th>STATUS</th></tr></thead><tbody>{issues.map((issue: ApiIssue) => <tr key={issue.id}><td><Link href={`/issues/${issue.id}`} className="issue-title"><span className="issue-symbol error-symbol"><AlertTriangle size={14} /></span><div><strong>{issue.title}</strong><small>{issue.errorType}</small></div></Link></td><td><strong className="event-count">{issue.count}</strong></td><td className="muted-cell">{issue.environment}</td><td className="muted-cell">{formatTimeAgo(issue.lastSeenAt)}</td><td><span className={statusClass(issue.status)}><span />{statusLabel(issue.status)}</span></td></tr>)}</tbody></table></div>
+                )}
+                <div className="table-footer"><span>Showing <strong>{issues.length}</strong> of <strong>{metrics!.totalIssues}</strong> issues</span><Link className="text-link" href="/issues">Explore all issues <span>→</span></Link></div>
+              </section>
+            </>
+          )}
+
+          <footer className="page-footer"><span>© 2026 Debugany</span><span><span className="footer-status" /> {connected ? `API connected · ${workspace.active?.name}` : projectId ? "Preview mode" : "No project selected"}</span><a href="https://github.com/siavash-debug/DebugAny" target="_blank" rel="noreferrer">Open-source project <ExternalLink size={12} /></a></footer>
         </div>
       </section>
     </main>

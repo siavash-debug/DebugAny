@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { Activity, AlertTriangle } from "lucide-react";
+import { Activity, AlertTriangle , LogOut } from "lucide-react";
 import { getIssue, type ApiState } from "../../../lib/api";
+import { requireWorkspace } from "../../../lib/workspace";
+import { logoutAction } from "../../../actions/auth";
 import { StatusActions } from "../status-actions";
 
 export const dynamic = "force-dynamic";
@@ -29,9 +31,12 @@ export default async function IssueDetailPage({
   const { id } = await params;
   const { offset: offsetParam } = await searchParams;
   const offset = Number(offsetParam ?? "0") || 0;
+  const workspace = await requireWorkspace();
+  const projectId = workspace.active?.id;
 
-  const result = await getIssue(id, PAGE_SIZE, offset);
-  const notFoundState = !result.ok && result.state.kind === "error" && result.state.status === 404;
+  const result = projectId ? await getIssue(projectId, id, PAGE_SIZE, offset) : undefined;
+  const notFoundState = !result?.ok && result?.state.kind === "error" && result.state.status === 404;
+  const noProject = !projectId;
 
   return (
     <main className="app-shell">
@@ -42,7 +47,15 @@ export default async function IssueDetailPage({
         <nav className="nav-list" style={{ marginTop: 16 }}>
           <Link className="nav-item" href="/">Overview</Link>
           <Link className="nav-item" href="/issues">Issues</Link>
+          {workspace.active && <Link className="nav-item" href="/settings">Settings</Link>}
         </nav>
+        <div className="sidebar-bottom">
+          <div className="profile-row">
+            <div className="profile-avatar">{(workspace.user.name || "U").slice(0, 2).toUpperCase()}</div>
+            <div className="profile-copy"><strong>{workspace.user.name || "Signed in"}</strong><small>{workspace.user.email}</small></div>
+            <form action={logoutAction}><button className="profile-more" type="submit" aria-label="Sign out"><LogOut size={14} /></button></form>
+          </div>
+        </div>
       </aside>
 
       <section className="main-panel">
@@ -51,17 +64,21 @@ export default async function IssueDetailPage({
         </header>
 
         <div className="content-wrap">
-          {notFoundState && (
+          {noProject && (
+            <div className="empty-state panel"><AlertTriangle size={22} /><strong>No project selected</strong><span>Create or select a project from the sidebar.</span></div>
+          )}
+
+          {projectId && notFoundState && (
             <div className="empty-state">
               <AlertTriangle size={22} />
               <strong>Issue not found</strong>
-              <span>It may belong to a different project or have been deleted. <Link href="/issues">Back to issues</Link></span>
+              <span>It may belong to a different project or have been deleted. <Link href={`/issues?project=${projectId}`}>Back to issues</Link></span>
             </div>
           )}
 
-          {!result.ok && !notFoundState && <StateBanner state={result.state} />}
+          {projectId && result && !result.ok && !notFoundState && <StateBanner state={result.state} />}
 
-          {result.ok && (
+          {projectId && result?.ok && (
             <>
               <div className="page-heading issue-detail-heading">
                 <div>
@@ -72,7 +89,7 @@ export default async function IssueDetailPage({
                   <span className={`status-pill ${result.data.issue.status === "RESOLVED" ? "resolved" : result.data.issue.status === "IGNORED" ? "ignored" : "unresolved"}`}>
                     <span />{result.data.issue.status.charAt(0) + result.data.issue.status.slice(1).toLowerCase()}
                   </span>
-                  <StatusActions issueId={result.data.issue.id} currentStatus={result.data.issue.status} />
+                  <StatusActions projectId={projectId!} issueId={result.data.issue.id} currentStatus={result.data.issue.status} />
                 </div>
               </div>
 

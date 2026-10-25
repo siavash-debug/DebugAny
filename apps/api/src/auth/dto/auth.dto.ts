@@ -1,4 +1,4 @@
-import { IsEmail, IsString, Matches, MaxLength, MinLength } from "class-validator";
+import { IsEmail, IsString, MaxLength, MinLength } from "class-validator";
 
 export class RegisterDto {
   @IsEmail()
@@ -10,7 +10,7 @@ export class RegisterDto {
   password!: string;
 
   @IsString()
-  @Matches(/^\S+$/, { message: "name must not contain whitespace" })
+  @MinLength(1)
   @MaxLength(120)
   name!: string;
 }

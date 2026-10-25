@@ -1,10 +1,13 @@
 /**
- * Server-side access to the Debugany API. The ingestion key stays on the
- * server; the browser only ever sees rendered results.
+ * Server-side access to the Debugany API. The user's session token lives only
+ * in an httpOnly cookie and is attached server-side; ingestion keys are never
+ * sent to or held by the browser.
  *
  * Every function returns a discriminated result so pages can render accurate
- * loading/empty/error/disconnected states instead of fabricated data.
+ * loading/empty/error/unauthorized states instead of fabricated data.
  */
+
+import { getSessionToken } from "./session";
 
 export type ApiState =
   | { kind: "unconfigured"; message: string }
@@ -21,37 +24,97 @@ function apiBaseUrl(): string | undefined {
   return configured?.endsWith("/") ? configured.slice(0, -1) : configured;
 }
 
-export function apiConnectionMessage(): string {
-  return "Set DEBUGANY_API_URL and DEBUGANY_API_KEY in apps/web/.env.local to load real events.";
-}
-
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   const baseUrl = apiBaseUrl();
-  const apiKey = process.env.DEBUGANY_API_KEY;
-  if (!baseUrl || !apiKey) {
-    return { ok: false, state: { kind: "unconfigured", message: apiConnectionMessage() } };
+  const sessionToken = await getSessionToken();
+  if (!baseUrl || !sessionToken) {
+    return { ok: false, state: { kind: "unconfigured", message: "No active session." } };
   }
 
   try {
     const response = await fetch(baseUrl + path, {
       ...init,
       headers: {
-        "x-debugany-key": apiKey,
+        authorization: `Bearer ${sessionToken}`,
         ...(init?.headers ?? {})
       },
       cache: "no-store"
     });
 
     if (response.status === 401) {
-      return { ok: false, state: { kind: "unauthorized", message: "The API rejected the dashboard key. Check DEBUGANY_API_KEY in apps/web/.env.local." } };
+      return { ok: false, state: { kind: "unauthorized", message: "Your session has expired. Please sign in again." } };
     }
     if (!response.ok) {
       return { ok: false, state: { kind: "error", status: response.status, message: `The API returned HTTP ${response.status}.` } };
     }
+    if (response.status === 204) {
+      return { ok: true, data: undefined as T };
+    }
     return { ok: true, data: (await response.json()) as T };
   } catch {
-    return { ok: false, state: { kind: "unreachable", message: "Could not reach the API. Check that it is running and DEBUGANY_API_URL is correct." } };
+    return { ok: false, state: { kind: "unreachable", message: "Could not reach the Debugany API. Check that it is running and DEBUGANY_API_URL is correct." } };
   }
+}
+
+// ---- unauthenticated ----
+
+export interface AuthPayload {
+  token: string;
+  user: { id: string; email: string; name: string };
+}
+
+/** Raw calls used by the auth server actions (no session required). */
+async function authFetch<T>(path: string, body: unknown): Promise<{ ok: true; data: T } | { ok: false; message: string }> {
+  const baseUrl = apiBaseUrl();
+  if (!baseUrl) {
+    return { ok: false, message: "Set DEBUGANY_API_URL in apps/web/.env.local to reach the API." };
+  }
+  try {
+    const response = await fetch(baseUrl + path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as { message?: string } | null;
+      return { ok: false, message: payload?.message ?? `The API returned HTTP ${response.status}.` };
+    }
+    return { ok: true, data: (await response.json()) as T };
+  } catch {
+    return { ok: false, message: "Could not reach the Debugany API. Check that it is running." };
+  }
+}
+
+export function apiRegister(email: string, password: string, name: string) {
+  return authFetch<AuthPayload>("/v1/auth/register", { email, password, name });
+}
+
+export function apiLogin(email: string, password: string) {
+  return authFetch<AuthPayload>("/v1/auth/login", { email, password });
+}
+
+export function apiLogout(): Promise<void> {
+  return getSessionToken().then((token) => {
+    if (!token) return;
+    const baseUrl = apiBaseUrl();
+    if (!baseUrl) return;
+    return fetch(baseUrl + "/v1/auth/logout", {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` }
+    }).then(() => undefined, () => undefined);
+  });
+}
+
+// ---- session-scoped ----
+
+export interface ProjectSummary {
+  id: string;
+  name: string;
+  slug: string;
+  role: "OWNER" | "MEMBER";
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface ApiIssue {
@@ -68,7 +131,6 @@ export interface ApiIssue {
 }
 
 export interface IssueListResponse {
-  project: { id: string; name: string; slug: string };
   issues: ApiIssue[];
   total: number;
   totalEvents: number;
@@ -88,14 +150,12 @@ export interface ApiEvent {
 }
 
 export interface IssueDetailResponse {
-  project: { id: string; name: string; slug: string };
   issue: ApiIssue & { stackTrace: string | null; createdAt: string; updatedAt: string };
   events: ApiEvent[];
   totalEvents: number;
 }
 
 export interface MetricsOverview {
-  project: { id: string; name: string; slug: string };
   windowHours: number;
   totalEvents: number;
   newIssues: number;
@@ -105,7 +165,56 @@ export interface MetricsOverview {
   series: Array<{ bucket: string; count: number }>;
 }
 
-export function listIssues(params: {
+export interface IngestionKeyView {
+  id: string;
+  prefix: string;
+  name: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface IngestionKeyCreated extends IngestionKeyView {
+  key: string;
+}
+
+export function getMe(): Promise<ApiResult<{ user: { id: string; email: string; name: string } }>> {
+  return apiFetch<{ user: { id: string; email: string; name: string } }>("/v1/auth/me");
+}
+
+export function listProjects(): Promise<ApiResult<ProjectSummary[]>> {
+  return apiFetch<ProjectSummary[]>("/v1/projects");
+}
+
+export function createProject(name: string, slug: string) {
+  return apiFetch<ProjectSummary>("/v1/projects", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name, slug })
+  });
+}
+
+export function updateProject(projectId: string, name: string) {
+  return apiFetch<ProjectSummary>(`/v1/projects/${encodeURIComponent(projectId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name })
+  });
+}
+
+export function deleteProject(projectId: string) {
+  return apiFetch<{ id: string; slug: string }>(`/v1/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE"
+  });
+}
+
+export function getProject(projectId: string): Promise<ApiResult<ProjectSummary>> {
+  // The API wraps the record: { project: {...} }.
+  return apiFetch<{ project: ProjectSummary }>(`/v1/projects/${encodeURIComponent(projectId)}`)
+    .then((result) => result.ok ? { ok: true, data: result.data.project } : result);
+}
+
+export function listIssues(projectId: string, params: {
   status?: string;
   environment?: string;
   search?: string;
@@ -118,21 +227,49 @@ export function listIssues(params: {
   if (params.search) query.set("search", params.search);
   query.set("limit", String(params.limit ?? 25));
   query.set("offset", String(params.offset ?? 0));
-  return apiFetch<IssueListResponse>(`/v1/issues?${query.toString()}`);
+  return apiFetch<IssueListResponse>(`/v1/projects/${encodeURIComponent(projectId)}/issues?${query.toString()}`);
 }
 
-export function getIssue(id: string, limit: number, offset: number): Promise<ApiResult<IssueDetailResponse>> {
-  return apiFetch<IssueDetailResponse>(`/v1/issues/${encodeURIComponent(id)}?limit=${limit}&offset=${offset}`);
+export function getIssue(projectId: string, id: string, limit: number, offset: number): Promise<ApiResult<IssueDetailResponse>> {
+  return apiFetch<IssueDetailResponse>(
+    `/v1/projects/${encodeURIComponent(projectId)}/issues/${encodeURIComponent(id)}?limit=${limit}&offset=${offset}`
+  );
 }
 
-export function getMetricsOverview(windowHours: number): Promise<ApiResult<MetricsOverview>> {
-  return apiFetch<MetricsOverview>(`/v1/metrics/overview?windowHours=${windowHours}`);
-}
-
-export function updateIssueStatus(id: string, status: "UNRESOLVED" | "RESOLVED" | "IGNORED"): Promise<ApiResult<ApiIssue>> {
-  return apiFetch<ApiIssue>(`/v1/issues/${encodeURIComponent(id)}/status`, {
+export function updateIssueStatus(projectId: string, id: string, status: "UNRESOLVED" | "RESOLVED" | "IGNORED") {
+  return apiFetch<ApiIssue>(`/v1/projects/${encodeURIComponent(projectId)}/issues/${encodeURIComponent(id)}/status`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ status })
+  });
+}
+
+export function getMetricsOverview(projectId: string, windowHours: number): Promise<ApiResult<MetricsOverview>> {
+  return apiFetch<MetricsOverview>(`/v1/projects/${encodeURIComponent(projectId)}/metrics/overview?windowHours=${windowHours}`);
+}
+
+export function listKeys(projectId: string): Promise<ApiResult<IngestionKeyView[]>> {
+  return apiFetch<IngestionKeyView[]>(`/v1/projects/${encodeURIComponent(projectId)}/keys`);
+}
+
+export function createKey(projectId: string, name?: string) {
+  return apiFetch<IngestionKeyCreated>(`/v1/projects/${encodeURIComponent(projectId)}/keys`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ name })
+  });
+}
+
+export function rotateKey(projectId: string, keyId: string) {
+  return apiFetch<IngestionKeyCreated>(`/v1/projects/${encodeURIComponent(projectId)}/keys/${encodeURIComponent(keyId)}/rotate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "ROTATE" })
+  });
+}
+
+export function revokeKey(projectId: string, keyId: string) {
+  return apiFetch<{ revoked: boolean }>(`/v1/projects/${encodeURIComponent(projectId)}/keys/${encodeURIComponent(keyId)}`, {
+    method: "DELETE"
   });
 }

@@ -6,6 +6,7 @@ import { ProjectsService } from "./projects.service";
 @Module({
   imports: [AuthModule],
   controllers: [ProjectsController],
-  providers: [ProjectsService]
+  providers: [ProjectsService],
+  exports: [ProjectsService]
 })
 export class ProjectsModule {}
