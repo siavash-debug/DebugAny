@@ -7,14 +7,14 @@ Debugany is an early-stage application observability platform for error tracking
 ## Current status
 
 The repository now contains:
-- A Next.js dashboard with real issue investigation pages (list, detail, resolve/reopen/ignore) and fully API-backed metrics
-- A NestJS API with health/readiness endpoints, transactional error-event ingestion into durable issues, paginated/filterable issue queries, a metrics overview endpoint, structured error responses, and correlation IDs
+- A Next.js dashboard behind user authentication (Argon2id passwords, httpOnly server-side sessions) with project switching, ingestion-key management, issue investigation pages, and fully API-backed metrics
+- A NestJS API with user accounts and DB-backed sessions, project membership with owner/member roles, revocable per-project ingestion keys (hash at rest), transactional error-event ingestion into durable issues, paginated/filterable issue queries, a metrics overview endpoint, rate-limited auth endpoints, an audit log, and structured error responses
 - PostgreSQL persistence via Prisma with versioned migrations
 - Vitest unit tests plus database-backed integration tests
 - Docker Compose for local PostgreSQL and Redis
 - CI that installs, migrates, typechecks, tests, and builds
 
-**Current limitation:** Every number on the dashboard comes from the API; fabricated service-health/latency/affected-user metrics were removed. Ingestion is synchronous (no queue yet), the dashboard uses a single project ingestion key (no user accounts), and alert delivery is not implemented. See [docs/implementation-plan.md](docs/implementation-plan.md).
+**Current limitation:** Every number on the dashboard comes from the API; fabricated metrics were removed. Users cannot invite collaborators yet (members are added via the API for now), ingestion is synchronous (no queue), and alert delivery is not implemented. See [docs/implementation-plan.md](docs/implementation-plan.md).
 
 ## Stack
 
@@ -38,6 +38,8 @@ npm run db:generate
 npm run db:migrate
 npm run db:seed
 ```
+
+The seed prints the demo user's password and the project's ingestion key once — save them immediately. Register additional accounts at http://localhost:3000/register.
 
 Useful checks:
 
@@ -72,7 +74,7 @@ See [API setup](apps/api/README.md), [web setup](apps/web/README.md), and [archi
 - [x] Versioned migrations, readiness probe, structured errors, and CI tests
 - [x] Persisted issues with durable grouping, status, and pagination
 - [x] Real time-series and issue metrics on the dashboard (no simulated data)
-- [ ] Add project management and safe key rotation
+- [x] User authentication, project management, and per-project key rotation/revocation
 - [ ] Process events asynchronously
 - [x] Issue resolution from the dashboard
 - [x] TypeScript SDK for capturing exceptions from applications

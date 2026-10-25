@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { IssueStatus, Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import type { ProjectRef } from "../auth/ingestion-key.guard";
+import { AuditService } from "../audit/audit.service";
 import { ListIssuesQueryDto } from "./dto/list-issues-query.dto";
 
 const ISSUE_LIST_SELECT = {
@@ -19,7 +19,10 @@ const ISSUE_LIST_SELECT = {
 
 @Injectable()
 export class IssuesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService
+  ) {}
 
   private buildWhere(projectId: string, query: ListIssuesQueryDto): Prisma.IssueWhereInput {
     const where: Prisma.IssueWhereInput = { projectId };
@@ -35,8 +38,8 @@ export class IssuesService {
     return where;
   }
 
-  async list(project: ProjectRef, query: ListIssuesQueryDto) {
-    const where = this.buildWhere(project.id, query);
+  async list(projectId: string, query: ListIssuesQueryDto) {
+    const where = this.buildWhere(projectId, query);
     const [issues, total, totalEvents] = await this.prisma.$transaction([
       this.prisma.issue.findMany({
         where,
@@ -46,11 +49,10 @@ export class IssuesService {
         select: ISSUE_LIST_SELECT
       }),
       this.prisma.issue.count({ where }),
-      this.prisma.errorEvent.count({ where: { projectId: project.id } })
+      this.prisma.errorEvent.count({ where: { projectId } })
     ]);
 
     return {
-      project: { id: project.id, name: project.name, slug: project.slug },
       issues,
       total,
       totalEvents,
@@ -59,9 +61,9 @@ export class IssuesService {
     };
   }
 
-  async getWithEvents(project: ProjectRef, issueId: string, eventLimit: number, eventOffset: number) {
+  async getWithEvents(projectId: string, issueId: string, eventLimit: number, eventOffset: number) {
     const issue = await this.prisma.issue.findFirst({
-      where: { id: issueId, projectId: project.id },
+      where: { id: issueId, projectId },
       select: {
         ...ISSUE_LIST_SELECT,
         stackTrace: true,
@@ -93,32 +95,39 @@ export class IssuesService {
       this.prisma.errorEvent.count({ where: { issueId: issue.id } })
     ]);
 
-    return { project: { id: project.id, name: project.name, slug: project.slug }, issue, events, totalEvents };
+    return { issue, events, totalEvents };
   }
 
-  async updateStatus(project: ProjectRef, issueId: string, status: IssueStatus) {
+  async updateStatus(projectId: string, issueId: string, status: IssueStatus, userId: string) {
     const issue = await this.prisma.issue.findFirst({
-      where: { id: issueId, projectId: project.id },
+      where: { id: issueId, projectId },
       select: { id: true }
     });
     if (!issue) {
       throw new NotFoundException("Issue not found.");
     }
 
-    return this.prisma.issue.update({
+    const updated = await this.prisma.issue.update({
       where: { id: issue.id },
       data: { status },
       select: { ...ISSUE_LIST_SELECT }
     });
+    await this.audit.record(this.prisma, {
+      projectId,
+      userId,
+      action: "issue.status_changed",
+      detail: { issueId, status }
+    });
+    return updated;
   }
 
   /** Counts used by the dashboard: total, unresolved, and new issues in a window. */
-  async summary(project: ProjectRef, since: Date) {
+  async summary(projectId: string, since: Date) {
     const [totalEvents, totalIssues, unresolved, newIssues] = await this.prisma.$transaction([
-      this.prisma.errorEvent.count({ where: { projectId: project.id, occurredAt: { gte: since } } }),
-      this.prisma.issue.count({ where: { projectId: project.id } }),
-      this.prisma.issue.count({ where: { projectId: project.id, status: IssueStatus.UNRESOLVED } }),
-      this.prisma.issue.count({ where: { projectId: project.id, firstSeenAt: { gte: since } } })
+      this.prisma.errorEvent.count({ where: { projectId, occurredAt: { gte: since } } }),
+      this.prisma.issue.count({ where: { projectId } }),
+      this.prisma.issue.count({ where: { projectId, status: IssueStatus.UNRESOLVED } }),
+      this.prisma.issue.count({ where: { projectId, firstSeenAt: { gte: since } } })
     ]);
     return { totalEvents, totalIssues, unresolved, newIssues };
   }

@@ -1,6 +1,8 @@
 import Link from "next/link";
-import { Activity, AlertTriangle, ChevronDown, Search } from "lucide-react";
-import { apiConnectionMessage, listIssues, type ApiState } from "../../lib/api";
+import { Activity, AlertTriangle, ChevronDown, Search , LogOut } from "lucide-react";
+import { listIssues, type ApiState } from "../../lib/api";
+import { requireWorkspace } from "../../lib/workspace";
+import { logoutAction } from "../../actions/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,9 +10,12 @@ const STATUSES = ["UNRESOLVED", "RESOLVED", "IGNORED"] as const;
 const PAGE_SIZE = 25;
 
 function StateBanner({ state }: { state: ApiState }) {
+  const title = state.kind === "unauthorized"
+    ? "Session expired"
+    : "API unavailable";
   return (
     <div className="demo-banner">
-      <div><strong>{state.kind === "unconfigured" ? "Dashboard not connected" : "API unavailable"}</strong><span>{state.message}</span></div>
+      <div><strong>{title}</strong><span>{state.message}</span></div>
     </div>
   );
 }
@@ -25,14 +30,14 @@ function formatTimeAgo(value: string): string {
   return Math.floor(hours / 24) + " days ago";
 }
 
-function pageHref(params: { status?: string; environment?: string; search?: string }, offset: number): string {
+function pageHref(projectId: string, params: { status?: string; environment?: string; search?: string }, offset: number): string {
   const query = new URLSearchParams();
   if (params.status) query.set("status", params.status);
   if (params.environment) query.set("environment", params.environment);
   if (params.search) query.set("search", params.search);
   if (offset > 0) query.set("offset", String(offset));
   const suffix = query.toString();
-  return "/issues" + (suffix ? "?" + suffix : "");
+  return `/issues?project=${encodeURIComponent(projectId)}` + (suffix ? `&${suffix}` : "");
 }
 
 export default async function IssuesPage({
@@ -40,15 +45,19 @@ export default async function IssuesPage({
 }: {
   searchParams: Promise<{ status?: string; environment?: string; search?: string; offset?: string }>;
 }) {
+  const workspace = await requireWorkspace();
   const params = await searchParams;
+  const projectId = workspace.active?.id;
   const offset = Number(params.offset ?? "0") || 0;
-  const result = await listIssues({
-    status: params.status,
-    environment: params.environment,
-    search: params.search,
-    limit: PAGE_SIZE,
-    offset
-  });
+  const result = projectId
+    ? await listIssues(projectId, {
+        status: params.status,
+        environment: params.environment,
+        search: params.search,
+        limit: PAGE_SIZE,
+        offset
+      })
+    : undefined;
 
   return (
     <main className="app-shell">
@@ -56,10 +65,19 @@ export default async function IssuesPage({
         <div className="sidebar-brand">
           <div className="brand-mark"><span className="brand-symbol"><Activity size={19} strokeWidth={2.5} /></span><span>debug<span>any</span></span></div>
         </div>
-        <nav className="nav-list" style={{ marginTop: 16 }}>
+        <div className="nav-label">WORKSPACE</div>
+        <nav className="nav-list">
           <Link className="nav-item" href="/">Overview</Link>
-          <a className="nav-item active" href="#">Issues</a>
+          <span className="nav-item active"><AlertTriangle size={17} />Issues</span>
+          {workspace.active && <Link className="nav-item" href="/settings">Settings</Link>}
         </nav>
+        <div className="sidebar-bottom">
+          <div className="profile-row">
+            <div className="profile-avatar">{(workspace.user.name || "U").slice(0, 2).toUpperCase()}</div>
+            <div className="profile-copy"><strong>{workspace.user.name || "Signed in"}</strong><small>{workspace.user.email}</small></div>
+            <form action={logoutAction}><button className="profile-more" type="submit" aria-label="Sign out"><LogOut size={14} /></button></form>
+          </div>
+        </div>
       </aside>
 
       <section className="main-panel">
@@ -68,13 +86,18 @@ export default async function IssuesPage({
         </header>
 
         <div className="content-wrap">
-          <div className="page-heading"><div><h1>Issues</h1><p>Every error group for the connected project.</p></div></div>
+          <div className="page-heading"><div><h1>Issues</h1><p>{workspace.active ? `Every error group for ${workspace.active.name}.` : "Select a project to see its issues."}</p></div></div>
 
-          {!result.ok && <StateBanner state={result.state} />}
+          {!projectId && (
+            <div className="empty-state panel"><AlertTriangle size={22} /><strong>No project selected</strong><span>Create or select a project from the sidebar.</span></div>
+          )}
 
-          {result.ok && (
+          {projectId && result && !result.ok && <StateBanner state={result.state} />}
+
+          {projectId && result?.ok && (
             <>
               <form className="issue-filters" method="get" action="/issues">
+                <input type="hidden" name="project" value={projectId} />
                 <div className="search-box">
                   <Search size={15} />
                   <input
@@ -98,12 +121,12 @@ export default async function IssuesPage({
                   <input name="environment" defaultValue={params.environment ?? ""} placeholder="production" aria-label="Filter by environment" />
                 </label>
                 <button className="primary-button" type="submit">Apply filters</button>
-                <Link className="text-link" href="/issues">Clear</Link>
+                <Link className="text-link" href={`/issues?project=${projectId}`}>Clear</Link>
               </form>
 
               <section className="panel issues-panel">
                 <div className="panel-heading issues-heading">
-                  <div><h2>Issue groups <span className="issue-count">{result.data.total}</span></h2><p>{result.data.project.name} · {result.data.totalEvents.toLocaleString()} events received</p></div>
+                  <div><h2>Issue groups <span className="issue-count">{result.data.total}</span></h2><p>{workspace.active?.name} · {result.data.totalEvents.toLocaleString()} events received</p></div>
                 </div>
 
                 {result.data.issues.length === 0 ? (
@@ -120,7 +143,7 @@ export default async function IssuesPage({
                         {result.data.issues.map((issue) => (
                           <tr key={issue.id}>
                             <td>
-                              <Link href={`/issues/${issue.id}`} className="issue-title">
+                              <Link href={`/issues/${issue.id}?project=${projectId}`} className="issue-title">
                                 <span className="issue-symbol error-symbol"><AlertTriangle size={14} /></span>
                                 <div><strong>{issue.title}</strong><small>{issue.errorType}</small></div>
                               </Link>
@@ -144,23 +167,12 @@ export default async function IssuesPage({
                 <div className="table-footer">
                   <span>Showing <strong>{result.data.issues.length}</strong> of <strong>{result.data.total}</strong> issues</span>
                   <span className="pager">
-                    {offset > 0 && <Link className="text-link" href={pageHref(params, Math.max(0, offset - PAGE_SIZE))}>← Previous</Link>}
-                    {offset + PAGE_SIZE < result.data.total && <Link className="text-link" href={pageHref(params, offset + PAGE_SIZE)}>Next →</Link>}
+                    {offset > 0 && <Link className="text-link" href={pageHref(projectId, params, Math.max(0, offset - PAGE_SIZE))}>← Previous</Link>}
+                    {offset + PAGE_SIZE < result.data.total && <Link className="text-link" href={pageHref(projectId, params, offset + PAGE_SIZE)}>Next →</Link>}
                   </span>
                 </div>
               </section>
-
-              <footer className="page-footer">
-                <span>© 2026 Debugany</span>
-                <span><span className="footer-status" /> API connected</span>
-              </footer>
             </>
-          )}
-
-          {!result.ok && (
-            <footer className="page-footer">
-              <span>© 2026 Debugany</span>
-            </footer>
           )}
         </div>
       </section>

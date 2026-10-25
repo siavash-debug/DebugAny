@@ -1,28 +1,46 @@
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
+import { hashPassword } from "../src/auth/password";
+import { generateIngestionKey, keyPrefix, sha256 } from "../src/auth/tokens";
 
 const prisma = new PrismaClient();
 
+// Local development seed. Prints credentials once; never commit them.
+// The demo user/password is for local use only.
 async function main() {
-  const apiKey = `dbg_live_${randomBytes(24).toString("hex")}`;
-  const apiKeyHash = createHash("sha256").update(apiKey).digest("hex");
-  const project = await prisma.project.upsert({
-    where: { slug: "demo-app" },
+  const email = "demo@debugany.local";
+  const password = `demo-${randomBytes(9).toString("base64url")}`;
+
+  const user = await prisma.user.upsert({
+    where: { email },
     update: {},
-    create: {
-      name: "Demo Application",
-      slug: "demo-app",
-      apiKeyHash
-    }
+    create: { email, name: "Demo User", passwordHash: await hashPassword(password) }
   });
 
-  console.log(`Project ready: ${project.name} (${project.id})`);
-  if (project.apiKeyHash === apiKeyHash) {
-    console.log("Save this ingestion key now; it will not be shown again:");
+  const apiKey = generateIngestionKey();
+  const existingProject = await prisma.project.findUnique({ where: { slug: "demo-app" } });
+
+  if (!existingProject) {
+    await prisma.$transaction(async (tx) => {
+      const project = await tx.project.create({
+        data: { name: "Demo Application", slug: "demo-app" }
+      });
+      await tx.projectMember.create({
+        data: { projectId: project.id, userId: user.id, role: "OWNER" }
+      });
+      await tx.ingestionKey.create({
+        data: { projectId: project.id, keyHash: sha256(apiKey), prefix: keyPrefix(apiKey), createdById: user.id }
+      });
+    });
+    console.log(`Project ready: Demo Application (owner ${email})`);
+    console.log("Dashboard login password (save it now; it will not be shown again):");
+    console.log(password);
+    console.log("Ingestion key (save it now; it will not be shown again):");
     console.log(apiKey);
   } else {
-    console.log("A demo project already exists. Its original API key is not recoverable from the database.");
-    console.log("Delete and recreate the demo project if you need a fresh key.");
+    console.log(`Demo project already exists (owner ${email}).`);
+    console.log("Its password and ingestion key are not recoverable from the database.");
+    console.log("Delete the demo user/project rows or the database volume for a fresh seed.");
   }
 }
 

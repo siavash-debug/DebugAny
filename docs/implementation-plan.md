@@ -109,7 +109,7 @@ Data model (`apps/api/prisma/schema.prisma`):
 - Acceptance: no number on the dashboard without a real data source or explicit
   "unavailable" label.
 
-### Phase 5 — Projects and authentication (remaining — next up)
+### Phase 5 — Projects and authentication ✅ (2026-10-25)
 - Dashboard user auth (email+password with Argon2/bcrypt, httpOnly session
   cookies), project CRUD scoped to users, per-project ingestion keys with
   generate/revoke/rotate and hash-only storage.
@@ -117,6 +117,27 @@ Data model (`apps/api/prisma/schema.prisma`):
   administrative actions.
 - Acceptance: two users cannot see each other's projects; revoked keys fail
   ingestion immediately.
+
+### Phase 5 — Projects and authentication ✅ (2026-10-25) — delivered
+- User auth: register/login/logout/me with Argon2id (OWASP parameters) and
+  opaque session tokens stored as SHA-256 hashes, 30-day expiry; rate limiting
+  (10/min/IP) on register/login via @nestjs/throttler; constant-time login
+  behavior for unknown accounts.
+- Projects: CRUD scoped by ProjectMember (OWNER/MEMBER); non-members always
+  get 404 (no existence disclosure); creator becomes OWNER; owner-only
+  update/delete/rotate; deletion cascades events/issues but not audit rows.
+- Keys: per-project IngestionKey rows (SHA-256 at rest, display prefix,
+  lastUsedAt tracking), create (raw shown once) / rotate (atomic) / revoke
+  (immediate 401); legacy Project.apiKeyHash backfilled and column dropped.
+- Dashboard: login/register, httpOnly session cookie, middleware redirect,
+  membership-validated active-project cookie, project switcher + creation,
+  settings page with key management and confirmed deletion; ingestion key
+  never reaches the browser.
+- Tests: 29 API tests including IDOR negatives, role boundaries, key
+  lifecycle, audit assertions; verified end-to-end in a browser.
+- Remaining risks: single API instance (in-memory throttler), no collaborator
+  invitations UI yet, sessions not sliding (fixed 30d), no password reset
+  flow (needs email delivery), audit log has no viewer UI.
 
 ### Phase 6 — Background processing and alerts (remaining)
 - BullMQ worker consuming ingestion (queue-then-persist with bounded retries and

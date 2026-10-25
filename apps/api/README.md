@@ -89,6 +89,22 @@ npm test        # from the repo root
 
 Unit tests for fingerprinting and metadata redaction always run. Integration tests exercise the real ingestion flow against Postgres when `DATABASE_URL` points at a reachable database (the local Docker instance or CI's service container) and are skipped otherwise.
 
+## Authentication and projects (Phase 5)
+
+- `POST /v1/auth/register` `{email, password, name}` → 201 with a session token (rate limited to 10/min per IP)
+- `POST /v1/auth/login` `{email, password}` → 200 with a session token
+- `POST /v1/auth/logout`, `GET /v1/auth/me` — require `Authorization: Bearer <session>`
+- Sessions are opaque 256-bit tokens stored as SHA-256 hashes with 30-day expiry; passwords use Argon2id
+- `GET /v1/projects`, `POST /v1/projects` — project list/create; creators become OWNER
+- `GET|PATCH|DELETE /v1/projects/:projectId` — member-only (update/delete: owner-only)
+- `GET|POST /v1/projects/:projectId/keys` — list/create ingestion keys (raw key returned exactly once)
+- `POST /v1/projects/:projectId/keys/:keyId/rotate` — owner-only atomic rotation
+- `DELETE /v1/projects/:projectId/keys/:keyId` — revoke; revoked and rotated-away keys fail ingestion immediately
+- Issue and metric reads live under `/v1/projects/:projectId/issues` and `/v1/projects/:projectId/metrics/overview`
+- Every project-scoped query resolves through project membership; cross-tenant access returns 404
+
+Sensitive actions (project create/update/delete, key create/rotate/revoke, issue status changes) are recorded in the append-only `AuditLog` table, which intentionally has no foreign keys and survives project deletion.
+
 ## Security notes
 
 - Store only a SHA-256 hash of ingestion keys.
