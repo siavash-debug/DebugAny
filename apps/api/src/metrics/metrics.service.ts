@@ -1,7 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { IssueStatus } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
-import type { ProjectRef } from "../auth/ingestion-key.guard";
 
 export interface SeriesBucket {
   /** ISO timestamp of the bucket start (UTC). */
@@ -13,16 +12,16 @@ export interface SeriesBucket {
 export class MetricsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async overview(project: ProjectRef, windowHours: number) {
+  async overview(projectId: string, windowHours: number) {
     const since = new Date(Date.now() - windowHours * 3_600_000);
 
     const [totalEvents, newIssues, unresolved, totalIssues, topIssues, rawSeries] = await this.prisma.$transaction([
-      this.prisma.errorEvent.count({ where: { projectId: project.id, occurredAt: { gte: since } } }),
-      this.prisma.issue.count({ where: { projectId: project.id, firstSeenAt: { gte: since } } }),
-      this.prisma.issue.count({ where: { projectId: project.id, status: IssueStatus.UNRESOLVED } }),
-      this.prisma.issue.count({ where: { projectId: project.id } }),
+      this.prisma.errorEvent.count({ where: { projectId, occurredAt: { gte: since } } }),
+      this.prisma.issue.count({ where: { projectId, firstSeenAt: { gte: since } } }),
+      this.prisma.issue.count({ where: { projectId, status: IssueStatus.UNRESOLVED } }),
+      this.prisma.issue.count({ where: { projectId } }),
       this.prisma.issue.findMany({
-        where: { projectId: project.id },
+        where: { projectId },
         orderBy: { count: "desc" },
         take: 5,
         select: { id: true, title: true, errorType: true, status: true, count: true, lastSeenAt: true }
@@ -30,7 +29,7 @@ export class MetricsService {
       this.prisma.$queryRaw<Array<{ bucket: Date; count: bigint }>>`
         SELECT date_trunc('hour', "occurredAt") AS bucket, count(*) AS count
         FROM "ErrorEvent"
-        WHERE "projectId" = ${project.id} AND "occurredAt" >= ${since}
+        WHERE "projectId" = ${projectId} AND "occurredAt" >= ${since}
         GROUP BY 1
         ORDER BY 1 ASC`
     ]);
@@ -48,7 +47,6 @@ export class MetricsService {
     }
 
     return {
-      project: { id: project.id, name: project.name, slug: project.slug },
       windowHours,
       totalEvents,
       newIssues,

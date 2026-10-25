@@ -29,9 +29,10 @@ function safeEqualHex(left: string, right: string): boolean {
 }
 
 /**
- * Authenticates ingestion requests with a project ingestion key and attaches
- * the resolved project to the request. Key hashes are compared in constant
- * time; raw keys are never logged or persisted.
+ * Authenticates ingestion requests with a per-project ingestion key. Keys are
+ * rows in the IngestionKey table (hash at rest); revoked or rotated keys fail
+ * immediately. Key hashes are compared in constant time; raw keys are never
+ * logged or persisted.
  */
 @Injectable()
 export class IngestionKeyGuard implements CanActivate {
@@ -47,16 +48,26 @@ export class IngestionKeyGuard implements CanActivate {
     }
 
     const apiKeyHash = sha256(apiKey);
-    const project = await this.prisma.project.findUnique({
-      where: { apiKeyHash },
-      select: { id: true, name: true, slug: true, apiKeyHash: true }
+    const key = await this.prisma.ingestionKey.findUnique({
+      where: { keyHash: apiKeyHash },
+      select: {
+        id: true,
+        keyHash: true,
+        revokedAt: true,
+        project: { select: { id: true, name: true, slug: true } }
+      }
     });
 
-    if (!project || !safeEqualHex(project.apiKeyHash, apiKeyHash)) {
+    if (!key || key.revokedAt !== null || !safeEqualHex(key.keyHash, apiKeyHash)) {
       throw new UnauthorizedException("Invalid ingestion key.");
     }
 
-    request.ingestionProject = { id: project.id, name: project.name, slug: project.slug };
+    request.ingestionProject = key.project;
+    // Best-effort usage tracking; must never block ingestion.
+    this.prisma.ingestionKey
+      .update({ where: { id: key.id }, data: { lastUsedAt: new Date() } })
+      .catch(() => undefined);
+
     return true;
   }
 }

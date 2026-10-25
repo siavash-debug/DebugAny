@@ -8,14 +8,82 @@ datasource db {
 }
 
 model Project {
-  id          String       @id @default(cuid())
+  id          String         @id @default(cuid())
   name        String
-  slug        String       @unique
-  apiKeyHash  String       @unique
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  slug        String         @unique
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
   events      ErrorEvent[]
   issues      Issue[]
+  members     ProjectMember[]
+  keys        IngestionKey[]
+}
+
+model User {
+  id            String          @id @default(cuid())
+  email         String          @unique
+  name          String          @db.VarChar(120)
+  passwordHash  String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  sessions      Session[]
+  memberships   ProjectMember[]
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  tokenHash String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+enum ProjectRole {
+  OWNER
+  MEMBER
+}
+
+model ProjectMember {
+  id        String      @id @default(cuid())
+  projectId String
+  project   Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      ProjectRole @default(MEMBER)
+  createdAt DateTime    @default(now())
+
+  @@unique([projectId, userId])
+  @@index([userId])
+}
+
+model IngestionKey {
+  id           String    @id @default(cuid())
+  projectId    String
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  keyHash      String    @unique
+  prefix       String    @db.VarChar(24)
+  name         String?   @db.VarChar(120)
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+  revokedAt    DateTime?
+
+  @@index([projectId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  projectId String?
+  userId    String?
+  action    String   @db.VarChar(80)
+  detail    Json?
+  createdAt DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([userId, createdAt])
 }
 
 enum IssueStatus {
