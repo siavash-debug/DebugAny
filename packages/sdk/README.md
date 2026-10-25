@@ -11,6 +11,20 @@ bodies, or local variables.
 The SDK lives in this monorepo (`packages/sdk`). Add it to your app via an
 npm workspace, a path dependency, or by publishing it from CI.
 
+## Getting an ingestion key
+
+Each project has its own keys. In the Debugany dashboard open
+**Settings → Ingestion keys** and create one, or use the API:
+
+```bash
+curl -X POST http://localhost:4000/v1/projects/PROJECT_ID/keys   -H 'authorization: Bearer YOUR_SESSION_TOKEN'   -H 'content-type: application/json' -d '{"name": "production"}'
+```
+
+The raw key (`dbg_live_…`) is returned exactly once; the API stores only its
+hash. Rotating a key atomically replaces it (the old key stops working
+immediately); revoking does the same without a replacement. Keep keys in
+server-side environment variables — never in client-side bundles.
+
 ## Quick start
 
 ```ts
