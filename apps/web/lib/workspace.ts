@@ -1,10 +1,5 @@
 import { redirect } from "next/navigation";
-import {
-  getActiveProjectId,
-  getSessionToken,
-  setActiveProjectCookie,
-  clearActiveProjectCookie
-} from "./session";
+import { getActiveProjectId, getSessionToken } from "./session";
 import { getMe, listProjects, type ProjectSummary } from "./api";
 
 export interface Workspace {
@@ -36,15 +31,11 @@ export async function requireWorkspace(): Promise<Workspace> {
   }
 
   const projects = projectsResult.data;
+  // Cookies can only be written in server actions, so the fallback is purely
+  // computational here; switchProjectAction persists the preference.
   const cookieProjectId = await getActiveProjectId();
   const active =
     projects.find((p) => p.id === cookieProjectId) ?? projects[0] ?? null;
-
-  if (active && active.id !== cookieProjectId) {
-    await setActiveProjectCookie(active.id);
-  } else if (!active && cookieProjectId) {
-    await clearActiveProjectCookie();
-  }
 
   return {
     user: meResult.ok ? meResult.data.user : { id: "", email: "", name: "" },

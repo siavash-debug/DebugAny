@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns";
@@ -52,10 +52,10 @@ export class WebhookDeliveryService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(DELIVERIES_QUEUE_TOKEN) private readonly deliveriesQueue: Queue<DeliveryJobData>,
-    options: DeliveryServiceOptions = {}
+    @Optional() options?: DeliveryServiceOptions
   ) {
-    this.urlCheck = options.urlCheck ?? (async (url) => void (await assertPublicWebhookHost(url)));
-    this.fetchImpl = options.fetchImpl ?? undiciFetch;
+    this.urlCheck = options?.urlCheck ?? (async (url) => void (await assertPublicWebhookHost(url)));
+    this.fetchImpl = options?.fetchImpl ?? undiciFetch;
   }
 
   /**

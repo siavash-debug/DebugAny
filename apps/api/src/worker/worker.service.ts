@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from "@nestjs/common";
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { Worker } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 import { IngestionCoreService } from "../events/ingestion-core.service";
@@ -20,7 +20,7 @@ export interface WorkerHealth {
  * row for inspection.
  */
 @Injectable()
-export class WorkerService implements OnModuleDestroy {
+export class WorkerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(WorkerService.name);
   private eventsWorker?: Worker<EventJobData>;
   private deliveriesWorker?: Worker<DeliveryJobData>;
@@ -36,6 +36,10 @@ export class WorkerService implements OnModuleDestroy {
     private readonly alerts: AlertsService,
     private readonly delivery: WebhookDeliveryService
   ) {}
+
+  onModuleInit(): void {
+    this.start();
+  }
 
   start(): void {
     this.eventsWorker = new Worker<EventJobData>(

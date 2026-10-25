@@ -273,3 +273,114 @@ export function revokeKey(projectId: string, keyId: string) {
     method: "DELETE"
   });
 }
+
+// ---- alert rules ----
+
+export type AlertRuleType = "NEW_ISSUE" | "NEW_ISSUE_MATCHING" | "ISSUE_THRESHOLD" | "ERROR_RATE";
+
+export interface AlertRuleView {
+  id: string;
+  name: string;
+  type: AlertRuleType;
+  config: {
+    titleContains?: string;
+    fingerprint?: string;
+    threshold?: number;
+    eventThreshold?: number;
+    windowMinutes?: number;
+  };
+  enabled: boolean;
+  cooldownMinutes: number;
+  webhookId: string | null;
+  lastTriggeredAt: string | null;
+}
+
+export function listAlertRules(projectId: string): Promise<ApiResult<AlertRuleView[]>> {
+  return apiFetch<AlertRuleView[]>(`/v1/projects/${encodeURIComponent(projectId)}/alerts`);
+}
+
+export function createAlertRule(projectId: string, body: {
+  name: string;
+  type: AlertRuleType;
+  config: AlertRuleView["config"];
+  cooldownMinutes?: number;
+  webhookId?: string;
+}): Promise<ApiResult<AlertRuleView>> {
+  return apiFetch<AlertRuleView>(`/v1/projects/${encodeURIComponent(projectId)}/alerts`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export function updateAlertRule(projectId: string, ruleId: string, body: Partial<{
+  name: string;
+  enabled: boolean;
+}>): Promise<ApiResult<AlertRuleView>> {
+  return apiFetch<AlertRuleView>(`/v1/projects/${encodeURIComponent(projectId)}/alerts/${encodeURIComponent(ruleId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export function deleteAlertRule(projectId: string, ruleId: string) {
+  return apiFetch<{ deleted: boolean }>(`/v1/projects/${encodeURIComponent(projectId)}/alerts/${encodeURIComponent(ruleId)}`, {
+    method: "DELETE"
+  });
+}
+
+// ---- webhooks ----
+
+export interface WebhookView {
+  id: string;
+  url: string;
+  name: string | null;
+  enabled: boolean;
+  createdAt: string;
+}
+
+export interface WebhookCreated extends WebhookView {
+  signingSecret: string;
+}
+
+export interface WebhookDeliveryView {
+  id: string;
+  alertRuleId: string | null;
+  status: "PENDING" | "DELIVERED" | "FAILED";
+  attempts: number;
+  responseStatus: number | null;
+  error: string | null;
+  createdAt: string;
+  deliveredAt: string | null;
+}
+
+export function listWebhooks(projectId: string): Promise<ApiResult<WebhookView[]>> {
+  return apiFetch<WebhookView[]>(`/v1/projects/${encodeURIComponent(projectId)}/webhooks`);
+}
+
+export function createWebhook(projectId: string, url: string, name?: string): Promise<ApiResult<WebhookCreated>> {
+  return apiFetch<WebhookCreated>(`/v1/projects/${encodeURIComponent(projectId)}/webhooks`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ url, name })
+  });
+}
+
+export function updateWebhook(projectId: string, webhookId: string, body: Partial<{ enabled: boolean }>): Promise<ApiResult<WebhookView>> {
+  return apiFetch<WebhookView>(`/v1/projects/${encodeURIComponent(projectId)}/webhooks/${encodeURIComponent(webhookId)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body)
+  });
+}
+
+export function deleteWebhook(projectId: string, webhookId: string) {
+  return apiFetch<{ deleted: boolean }>(`/v1/projects/${encodeURIComponent(projectId)}/webhooks/${encodeURIComponent(webhookId)}`, {
+    method: "DELETE"
+  });
+}
+
+export function listWebhookDeliveries(projectId: string, webhookId: string): Promise<ApiResult<WebhookDeliveryView[]>> {
+  return apiFetch<WebhookDeliveryView[]>(`/v1/projects/${encodeURIComponent(projectId)}/webhooks/${encodeURIComponent(webhookId)}/deliveries?limit=20`);
+}

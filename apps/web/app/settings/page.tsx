@@ -1,10 +1,19 @@
 import Link from "next/link";
 import { AlertTriangle, Activity , LogOut } from "lucide-react";
-import { getProject, listKeys } from "../../lib/api";
+import {
+  getProject,
+  listAlertRules,
+  listKeys,
+  listWebhookDeliveries,
+  listWebhooks,
+  type WebhookDeliveryView
+} from "../../lib/api";
 import { requireWorkspace } from "../../lib/workspace";
 import { logoutAction } from "../../actions/auth";
 import { KeyManager } from "./key-manager";
 import { RenameForm, DangerZone } from "./settings-forms";
+import { AlertRulesManager } from "./alert-rules-manager";
+import { WebhooksManager } from "./webhooks-manager";
 
 export const dynamic = "force-dynamic";
 
@@ -13,9 +22,18 @@ export default async function SettingsPage() {
   const project = workspace.active;
   const projectId = project?.id;
 
-  const [projectResult, keysResult] = projectId
-    ? await Promise.all([getProject(projectId), listKeys(projectId)])
-    : [undefined, undefined];
+  const [projectResult, keysResult, rulesResult, webhooksResult] = projectId
+    ? await Promise.all([getProject(projectId), listKeys(projectId), listAlertRules(projectId), listWebhooks(projectId)])
+    : [undefined, undefined, undefined, undefined];
+
+  const webhooks = webhooksResult?.ok ? webhooksResult.data : [];
+  const deliveriesByWebhook: Record<string, WebhookDeliveryView[]> = {};
+  if (webhooks.length > 0 && projectId) {
+    await Promise.all(webhooks.map(async (webhook) => {
+      const deliveries = await listWebhookDeliveries(projectId, webhook.id);
+      if (deliveries.ok) deliveriesByWebhook[webhook.id] = deliveries.data;
+    }));
+  }
 
   return (
     <main className="app-shell">
@@ -59,6 +77,10 @@ export default async function SettingsPage() {
               <RenameForm projectId={projectId} currentName={projectResult.data.name} canRename={projectResult.data.role === "OWNER"} />
 
               <KeyManager projectId={projectId} keys={keysResult.data} canRotate={projectResult.data.role === "OWNER"} />
+
+              <AlertRulesManager projectId={projectId} rules={rulesResult?.ok ? rulesResult.data : []} webhooks={webhooks} />
+
+              <WebhooksManager projectId={projectId} webhooks={webhooks} deliveriesByWebhook={deliveriesByWebhook} />
 
               <section className="panel">
                 <div className="panel-heading issues-heading"><div><h2>Connect the SDK</h2><p>Send events with an ingestion key from the table above.</p></div></div>
