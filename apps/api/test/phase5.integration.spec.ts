@@ -48,7 +48,7 @@ describeIntegration("phase 5: auth, projects, keys, isolation (integration)", ()
   });
 
   afterAll(async () => {
-    await prisma.user.deleteMany({ where: { email: { endsWith: "@test.debugany.local" } } });
+    await prisma.user.deleteMany({ where: { email: { startsWith: "p5-" } } });
     await prisma.$disconnect();
   });
 
@@ -105,8 +105,8 @@ describeIntegration("phase 5: auth, projects, keys, isolation (integration)", ()
   });
 
   it("creates projects with the creator as OWNER and lists only their projects", async () => {
-    alice = await createUser(prisma, "alice");
-    bob = await createUser(prisma, "bob");
+    alice = await createUser(prisma, "p5-alice");
+    bob = await createUser(prisma, "p5-bob");
     aliceProject = await projects.create(alice.user, {
       name: "Alice Console",
       slug: `alice-${Math.random().toString(36).slice(2, 10)}`

@@ -95,7 +95,7 @@ describeIntegration("phase 6: alerts, webhooks, idempotency (integration)", () =
 
   afterAll(async () => {
     await prisma.project.delete({ where: { id: project.id } }).catch(() => undefined);
-    await prisma.user.deleteMany({ where: { email: { endsWith: "@test.debugany.local" } } }).catch(() => undefined);
+    await prisma.user.deleteMany({ where: { email: { startsWith: "p6-" } } }).catch(() => undefined);
     await deliveriesQueue.close().catch(() => undefined);
     await prisma.$disconnect();
     await new Promise<void>((resolve) => server.close(() => resolve()));

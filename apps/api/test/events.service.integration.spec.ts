@@ -30,7 +30,7 @@ describeIntegration("ingestion pipeline (integration)", () => {
     core = new IngestionCoreService(prisma);
     issues = new IssuesService(prisma, audit);
     guard = new IngestionKeyGuard(prisma);
-    owner = await createUser(prisma, "ingest-owner");
+    owner = await createUser(prisma, "ing-ingest-owner");
     project = await createProjectOwnedBy(prisma, owner, "ingest");
     apiKey = await createIngestionKey(prisma, project.id);
   });
