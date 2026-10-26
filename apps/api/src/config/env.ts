@@ -26,6 +26,17 @@ export const env = {
   get workerEnabled(): boolean {
     return bool("DEBUGANY_WORKER", false);
   },
+  /**
+   * Where auth rate limits are stored: per-process memory (default,
+   * single-instance) or Redis (shared across API instances).
+   */
+  get rateLimitStorage(): "memory" | "redis" {
+    const raw = str("DEBUGANY_RATE_LIMIT_STORAGE", "memory")!;
+    if (raw !== "memory" && raw !== "redis") {
+      throw new Error("DEBUGANY_RATE_LIMIT_STORAGE must be 'memory' or 'redis'.");
+    }
+    return raw;
+  },
   /** Base64-encoded 32-byte AES-256 key used to encrypt webhook secrets at rest. */
   get encryptionKey(): Buffer | undefined {
     const raw = str("DEBUGANY_ENCRYPTION_KEY");

@@ -44,8 +44,9 @@ The seed prints the demo user's password and the project's ingestion key once â€
 Useful checks:
 
 ```bash
-npm test          # unit tests; integration tests run when Postgres is reachable
-npm run typecheck # strict typecheck of API and dashboard
+npm test                # unit tests; integration tests run when Postgres is reachable
+npm run typecheck       # strict typecheck of API and dashboard
+npm run verify:restore  # backup/restore drill: dumps the app DB, restores it into a disposable database, verifies row counts
 ```
 
 Run the API in one terminal (add `DEBUGANY_INGESTION_MODE_QUEUE=true` to apps/api/.env to enqueue events):

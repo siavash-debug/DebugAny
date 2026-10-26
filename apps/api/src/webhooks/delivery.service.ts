@@ -1,4 +1,4 @@
-import { Inject, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns";
@@ -295,18 +295,34 @@ export class WebhookDeliveryService {
     return agent;
   }
 
-  /** Operator requeue of a failed delivery: grants a fresh attempt budget. */
-  async requeueFailed(deliveryId: string, projectId: string): Promise<{ requeued: boolean }> {
-    const delivery = await this.prisma.webhookDelivery.findFirst({
-      where: { id: deliveryId, projectId, status: "FAILED" },
-      select: { dedupeKey: true }
-    });
-    if (!delivery) {
-      throw new NotFoundException("Delivery not found.");
-    }
-    await this.prisma.webhookDelivery.update({
-      where: { dedupeKey: delivery.dedupeKey },
+  /**
+   * Operator requeue of a failed delivery: grants a fresh attempt budget.
+   * Only FAILED rows are eligible; PENDING/DELIVERED rows are rejected with a
+   * conflict so double-clicks and concurrent requeues cannot double-send.
+   * The reset is conditional on `status: "FAILED"` in the database, so of two
+   * racing calls at most one of them can succeed.
+   */
+  async requeueFailed(projectId: string, webhookId: string, deliveryId: string): Promise<{ requeued: boolean }> {
+    const reset = await this.prisma.webhookDelivery.updateMany({
+      where: { id: deliveryId, projectId, endpointId: webhookId, status: "FAILED" },
       data: { status: "PENDING", attempts: 0, error: null, startedAt: null }
+    });
+    if (reset.count === 0) {
+      const existing = await this.prisma.webhookDelivery.findFirst({
+        where: { id: deliveryId, projectId, endpointId: webhookId },
+        select: { status: true }
+      });
+      if (!existing) {
+        throw new NotFoundException("Delivery not found.");
+      }
+      if (existing.status === "PENDING") {
+        throw new ConflictException("Delivery is already pending delivery.");
+      }
+      throw new ConflictException("Only FAILED deliveries can be requeued.");
+    }
+    const delivery = await this.prisma.webhookDelivery.findUniqueOrThrow({
+      where: { id: deliveryId },
+      select: { dedupeKey: true }
     });
     await this.deliveriesQueue.add(
       "deliver",

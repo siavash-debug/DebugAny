@@ -44,6 +44,16 @@ export class WebhooksController {
     return this.webhooks.delete(projectId, user.id, webhookId);
   }
 
+  @Post(":webhookId/deliveries/:deliveryId/requeue")
+  requeue(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("projectId") projectId: string,
+    @Param("webhookId") webhookId: string,
+    @Param("deliveryId") deliveryId: string
+  ) {
+    return this.webhooks.requeueDelivery(projectId, user.id, webhookId, deliveryId);
+  }
+
   @Get(":webhookId/deliveries")
   deliveries(
     @CurrentUser() user: AuthenticatedUser,

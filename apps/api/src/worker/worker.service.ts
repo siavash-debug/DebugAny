@@ -64,7 +64,7 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
         }
         return { eventId: result.event.id, duplicate: result.duplicate === true };
       },
-      { connection: QUEUE_CONNECTION, concurrency: 5 }
+      { connection: QUEUE_CONNECTION, concurrency: 5, lockDuration: 60_000 }
     );
     this.eventsWorker.on("completed", () => this.health.events.processed++);
     this.eventsWorker.on("failed", (job, error) => {
@@ -79,7 +79,14 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
       },
       // Webhook retries happen inside deliverOnce (bounded backoff); one queue
       // attempt is enough, and failures remain inspectable via delivery rows.
-      { connection: QUEUE_CONNECTION, concurrency: 5 }
+      // lockDuration spans the worst-case in-job budget (3 attempts x 10s
+      // timeout + backoff ~ 34s) so a legitimately slow send is never declared
+      // stalled and reclaimed beyond the row-level claim.
+      {
+        connection: QUEUE_CONNECTION,
+        concurrency: 5,
+        lockDuration: 60_000
+      }
     );
     this.deliveriesWorker.on("completed", () => this.health.deliveries.processed++);
     this.deliveriesWorker.on("failed", (job, error) => {

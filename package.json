@@ -25,6 +25,7 @@
     "db:generate": "npm run prisma:generate --workspace @debugany/api",
     "db:migrate": "npm run prisma:migrate --workspace @debugany/api",
     "db:seed": "npm run prisma:seed --workspace @debugany/api",
+    "verify:restore": "node scripts/verify-pg-restore.mjs",
     "check:repo": "node -e \"const p = require('./package.json'); if (!p.workspaces.includes('apps/api') || !p.workspaces.includes('apps/web')) process.exit(1); console.log('Debugany workspaces are configured.')\"",
     "build:sdk": "npm run build --workspace @debugany/sdk",
     "test:sdk": "npm run test --workspace @debugany/sdk",

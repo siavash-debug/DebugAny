@@ -317,7 +317,9 @@ describeIntegration("phase 6: delivery recovery (integration)", () => {
   let webhooks: WebhooksService;
   let delivery: WebhookDeliveryService;
   let alice: TestUser;
+  let bob: TestUser;
   let project: { id: string; name: string; slug: string };
+  let otherProject: { id: string; name: string; slug: string };
   let hook: { id: string; signingSecret: string };
   let deliveriesQueue: Queue;
 
@@ -326,17 +328,22 @@ describeIntegration("phase 6: delivery recovery (integration)", () => {
     const audit = new AuditService(prisma);
     projects = new ProjectsService(prisma, audit);
     deliveriesQueue = new Queue("deliveries", { connection: { url: redisUrl } });
+    delivery = new WebhookDeliveryService(prisma, deliveriesQueue, { urlCheck: async () => undefined });
     class TestWebhooks extends WebhooksService {
       override async checkUrl(): Promise<void> {
         return;
       }
     }
-    webhooks = new TestWebhooks(prisma, projects, audit);
-    delivery = new WebhookDeliveryService(prisma, deliveriesQueue, { urlCheck: async () => undefined });
+    webhooks = new TestWebhooks(prisma, projects, audit, delivery);
     alice = await createUser(prisma, "p6-recover");
+    bob = await createUser(prisma, "p6-other");
     project = await projects.create(alice.user, {
       name: "Recovery",
       slug: `p6r-${Math.random().toString(36).slice(2, 10)}`
+    });
+    otherProject = await projects.create(bob.user, {
+      name: "Recovery Other",
+      slug: `p6ro-${Math.random().toString(36).slice(2, 10)}`
     });
     hook = await webhooks.create(project.id, alice.user.id, { url: serverUrl });
     secrets.set(hook.id, hook.signingSecret);
@@ -344,6 +351,7 @@ describeIntegration("phase 6: delivery recovery (integration)", () => {
 
   afterAll(async () => {
     await prisma.project.delete({ where: { id: project.id } }).catch(() => undefined);
+    await prisma.project.delete({ where: { id: otherProject.id } }).catch(() => undefined);
     await prisma.user.deleteMany({ where: { email: { startsWith: "p6-" } } }).catch(() => undefined);
     await deliveriesQueue.close().catch(() => undefined);
     await prisma.$disconnect();
@@ -380,6 +388,21 @@ describeIntegration("phase 6: delivery recovery (integration)", () => {
     }
     expect(after.status).toBe("DELIVERED");
     expect(receiver.requests).toHaveLength(1);
+  });
+
+  it("recovers claims that just crossed the staleness boundary", async () => {
+    receiver.requests.length = 0;
+    receiverMode = "ok";
+    // A worker crashed mid-send ~85s ago: past the staleness cutoff (2 x 10s
+    // request timeout + 60s margin), so the sweep must reclaim it.
+    const row = await makeDelivery(`boundary-${randomUUID()}`, {
+      startedAt: new Date(Date.now() - 85_000)
+    });
+    await delivery.recoverAbandoned(50);
+    const boundaryJobs = await deliveriesQueue.getJobs(["waiting", "active", "prioritized"], 0, 100);
+    expect(boundaryJobs.map((job) => (job.data as { deliveryKey?: string }).deliveryKey)).toContain(row.dedupeKey);
+    await delivery.deliverOnce(row.dedupeKey);
+    expect((await prisma.webhookDelivery.findUniqueOrThrow({ where: { dedupeKey: row.dedupeKey } })).status).toBe("DELIVERED");
   });
 
   it("does not recover fresh claims or exhausted deliveries", async () => {
@@ -434,13 +457,93 @@ describeIntegration("phase 6: delivery recovery (integration)", () => {
     receiver.requests.length = 0;
     receiverMode = "ok";
     const row = await makeDelivery(`requeue-${randomUUID()}`, { status: "FAILED" as never, attempts: 3, error: "old" });
-    await delivery.requeueFailed(row.id, project.id);
+    await webhooks.requeueDelivery(project.id, alice.user.id, hook.id, row.id);
     const reset = await prisma.webhookDelivery.findUniqueOrThrow({ where: { dedupeKey: row.dedupeKey } });
     expect(reset.status).toBe("PENDING");
     expect(reset.attempts).toBe(0);
 
+    // The requeue is audited without leaking the signing secret.
+    const auditRows = await prisma.auditLog.findMany({
+      where: { projectId: project.id, action: "webhook.delivery_requeued" }
+    });
+    expect(auditRows.length).toBeGreaterThanOrEqual(1);
+    expect(JSON.stringify(auditRows[0].detail)).not.toContain(hook.signingSecret);
+    expect(JSON.stringify(auditRows[0].detail)).toContain(row.id);
+
     await delivery.deliverOnce(row.dedupeKey);
     expect((await prisma.webhookDelivery.findUniqueOrThrow({ where: { dedupeKey: row.dedupeKey } })).status).toBe("DELIVERED");
+    expect(receiver.requests).toHaveLength(1);
+  });
+
+  it("requeues only FAILED deliveries of the right endpoint", async () => {
+    receiver.requests.length = 0;
+    receiverMode = "ok";
+    // Delivered row: idempotent requeue must be rejected, not double-send.
+    const deliveredRow = await makeDelivery(`delv-${randomUUID()}`, { status: "DELIVERED" as never, attempts: 1 });
+    await expect(webhooks.requeueDelivery(project.id, alice.user.id, hook.id, deliveredRow.id)).rejects.toMatchObject({
+      status: 409
+    });
+    // Pending row: already queued, so another requeue must conflict.
+    const pendingRow = await makeDelivery(`pend-${randomUUID()}`);
+    await expect(webhooks.requeueDelivery(project.id, alice.user.id, hook.id, pendingRow.id)).rejects.toMatchObject({
+      status: 409
+    });
+    expect((await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: pendingRow.id } })).attempts).toBe(0);
+    // Unknown delivery id: 404, no state change.
+    await expect(webhooks.requeueDelivery(project.id, alice.user.id, hook.id, "no-such-delivery")).rejects.toMatchObject({
+      status: 404
+    });
+    // Broken endpoint scoping: a delivery on another endpoint of the project is 404.
+    const otherHook = await webhooks.create(project.id, alice.user.id, { url: serverUrl });
+    const otherRow = await makeDelivery(`other-${randomUUID()}`, { status: "FAILED" as never, attempts: 3, endpointId: otherHook.id });
+    await expect(webhooks.requeueDelivery(project.id, alice.user.id, hook.id, otherRow.id)).rejects.toMatchObject({
+      status: 404
+    });
+    await webhooks.delete(project.id, alice.user.id, otherHook.id);
+  });
+
+  it("blocks cross-tenant requeues (idor)", async () => {
+    const otherHookRow = await webhooks.create(
+      otherProject.id,
+      bob.user.id,
+      { url: serverUrl }
+    );
+    const foreignRow = await prisma.webhookDelivery.create({
+      data: {
+        endpointId: otherHookRow.id,
+        projectId: otherProject.id,
+        dedupeKey: `foreign-${randomUUID()}`,
+        payload: { type: "alert.triggered" } as object,
+        status: "FAILED" as never,
+        attempts: 3
+      }
+    });
+    // Alice (not a member of otherProject) cannot requeue that delivery
+    // through her own project or through it.
+    await expect(webhooks.requeueDelivery(otherProject.id, alice.user.id, otherHookRow.id, foreignRow.id)).rejects.toMatchObject({ status: 404 });
+    await expect(webhooks.requeueDelivery(project.id, alice.user.id, hook.id, foreignRow.id)).rejects.toMatchObject({ status: 404 });
+    expect((await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: foreignRow.id } })).status).toBe("FAILED");
+    await prisma.webhookDelivery.delete({ where: { id: foreignRow.id } });
+    await webhooks.delete(otherProject.id, bob.user.id, otherHookRow.id);
+  });
+
+  it("survives concurrent operator requeues with a single winner", async () => {
+    receiver.requests.length = 0;
+    receiverMode = "ok";
+    const row = await makeDelivery(`race-${randomUUID()}`, { status: "FAILED" as never, attempts: 3 });
+    const outcome = await Promise.allSettled([
+      webhooks.requeueDelivery(project.id, alice.user.id, hook.id, row.id),
+      webhooks.requeueDelivery(project.id, alice.user.id, hook.id, row.id)
+    ]);
+    const succeeded = outcome.filter((r) => r.status === "fulfilled");
+    const conflicted = outcome.filter((r) => r.status === "rejected");
+    expect(succeeded).toHaveLength(1);
+    expect(conflicted).toHaveLength(1);
+    expect((conflicted[0] as PromiseRejectedResult).reason).toMatchObject({ status: 409 });
+    const raced = await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: row.id } });
+    expect(raced.status).toBe("PENDING");
+    expect(raced.attempts).toBe(0);
+    await delivery.deliverOnce(row.dedupeKey);
     expect(receiver.requests).toHaveLength(1);
   });
 });

@@ -175,6 +175,40 @@ Data model (`apps/api/prisma/schema.prisma`):
   no email channel; webhook targets must resolve DNS at creation; audit log
   has no viewer; no delivery requeue API yet.
 
+### Phase 8 — Reliability hardening, part 2 ✅ (2026-10-26)
+- **Authenticated delivery operations.** `POST
+  /projects/:projectId/webhooks/:webhookId/deliveries/:deliveryId/requeue`
+  (session auth + project membership). Only FAILED deliveries of the exact
+  endpoint are eligible (`404` cross-tenant/unknown, `409` already pending or
+  delivered); the reset is a conditional `updateMany`, so concurrent requeues
+  have a single winner. Audited as `webhook.delivery_requeued` (ids only, no
+  secrets or payloads). Regression tests cover requeue→delivery, invalid
+  states, concurrency, IDOR, and audit content.
+- **Shared rate limiting (multi-instance ready).** `RateLimitModule` +
+  `RedisRateLimitStorage`: atomic INCR/PEXPIRE window counting in Redis;
+  enabled with `DEBUGANY_RATE_LIMIT_STORAGE=redis` (default remains per-process
+  memory for local dev). Fail-closed by design: if Redis is unreachable,
+  throttled endpoints return 503 rather than running without a shared limit.
+  Tests: unit (record mapping, clamped TTL, fail-closed) and integration
+  (counters shared across two storage instances against real Redis).
+- **Backup/restore (verified, not just documented).** `docs/operations/
+  backup-restore.md` runbook: logical vs. snapshot vs. provider-managed,
+  encryption/retention/access guidance, manual restore steps, and
+  `npm run verify:restore` (`scripts/verify-pg-restore.mjs`) which dumps the
+  app database, restores it into a disposable `restore_*` database on the same
+  server, compares row counts of 9 tables, then drops the drill database.
+  Drill executed 2026-10-26: PASSED (9/9 tables matched, 74 KB dump).
+- **Worker hardening.** Explicit 60s BullMQ `lockDuration` on both workers
+  (worst-case in-job delivery budget is ~34s, so a slow legitimate send is
+  never declared stalled); tests for the staleness boundary (85s-old claims
+  recovered, fresh claims skipped) and `/v1/worker/health` backlog behavior
+  (null on Redis outage instead of a 500). Docker compose enables Redis AOF so
+  queue state and rate-limit counters survive restarts.
+- Remaining: rate limiter wiring is exercised at the storage layer (no
+  full-HTTP e2e throttle test yet); requeue has no dashboard UI yet; sessions
+  are fixed-30d (no sliding expiry); no email channel; audit log viewer still
+  missing.
+
 ### Phase 8 — Reliability hardening (delivery recovery) ✅ (2026-10-25/26)
 - Delivery claim marker: `WebhookDelivery.startedAt` (migration
   `20261025103338_delivery_claim_marker`, index `(status, startedAt)`).

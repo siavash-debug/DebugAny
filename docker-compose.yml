@@ -21,6 +21,9 @@ services:
     image: redis:7-alpine
     container_name: debugany-redis
     restart: unless-stopped
+    # AOF persistence keeps queue state and the shared rate-limit counters
+    # across Redis restarts; without it, in-flight jobs and counters vanish.
+    command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"
     volumes:
