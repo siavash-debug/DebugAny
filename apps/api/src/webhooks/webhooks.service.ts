@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException, Optional, ServiceUnavailableException } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
@@ -8,6 +8,7 @@ import { encryptSecret, generateWebhookSecret } from "./crypto";
 import { assertPublicWebhookHost } from "./ssrf";
 import { env } from "../config/env";
 import { CreateWebhookDto, UpdateWebhookDto } from "./dto/webhook.dto";
+import { WebhookDeliveryService } from "./delivery.service";
 
 const WEBHOOK_SELECT = {
   id: true,
@@ -44,7 +45,8 @@ export class WebhooksService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly projects: ProjectsService,
-    private readonly audit: AuditService
+    private readonly audit: AuditService,
+    @Optional() private readonly delivery?: WebhookDeliveryService
   ) {}
 
   async list(projectId: string, userId: string) {
@@ -127,6 +129,33 @@ export class WebhooksService {
       detail: { webhookId }
     });
     return { deleted: true };
+  }
+
+  /**
+   * Requeues a failed delivery for a member after verifying tenant scoping.
+   * The delivery service enforces the FAILED-only precondition; we audit the
+   * action without recording secrets or payloads.
+   */
+  async requeueDelivery(projectId: string, userId: string, webhookId: string, deliveryId: string) {
+    await this.projects.requireMember(projectId, userId);
+    const endpoint = await this.prisma.webhookEndpoint.findFirst({
+      where: { id: webhookId, projectId },
+      select: { id: true }
+    });
+    if (!endpoint) {
+      throw new NotFoundException("Webhook not found.");
+    }
+    if (!this.delivery) {
+      throw new ServiceUnavailableException("Delivery service is not available.");
+    }
+    const result = await this.delivery.requeueFailed(projectId, endpoint.id, deliveryId);
+    await this.audit.record(this.prisma, {
+      projectId,
+      userId,
+      action: "webhook.delivery_requeued",
+      detail: { webhookId, deliveryId }
+    });
+    return result;
   }
 
   /** Delivery history for one endpoint, newest first, bounded page. */

@@ -1,10 +1,10 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
-import { Worker } from "bullmq";
+import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { Worker, type Queue } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 import { IngestionCoreService } from "../events/ingestion-core.service";
 import { AlertsService } from "../alerts/alerts.service";
 import { WebhookDeliveryService } from "../webhooks/delivery.service";
-import { DELIVERIES_QUEUE, EVENTS_QUEUE, QUEUE_CONNECTION, type DeliveryJobData, type EventJobData } from "../queue/queue.module";
+import { DELIVERIES_QUEUE, DELIVERIES_QUEUE_TOKEN, EVENTS_QUEUE, EVENTS_QUEUE_TOKEN, QUEUE_CONNECTION, type DeliveryJobData, type EventJobData } from "../queue/queue.module";
 
 export interface WorkerHealth {
   running: boolean;
@@ -29,12 +29,16 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
     events: { processed: 0, failed: 0 },
     deliveries: { processed: 0, failed: 0 }
   };
+  private recoveryTimer?: ReturnType<typeof setInterval>;
+  private recoveryTimeoutMs = 10_000;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly core: IngestionCoreService,
     private readonly alerts: AlertsService,
-    private readonly delivery: WebhookDeliveryService
+    private readonly delivery: WebhookDeliveryService,
+    @Inject(EVENTS_QUEUE_TOKEN) private readonly eventsQueue: Queue,
+    @Inject(DELIVERIES_QUEUE_TOKEN) private readonly deliveriesQueue: Queue
   ) {}
 
   onModuleInit(): void {
@@ -60,7 +64,7 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
         }
         return { eventId: result.event.id, duplicate: result.duplicate === true };
       },
-      { connection: QUEUE_CONNECTION, concurrency: 5 }
+      { connection: QUEUE_CONNECTION, concurrency: 5, lockDuration: 60_000 }
     );
     this.eventsWorker.on("completed", () => this.health.events.processed++);
     this.eventsWorker.on("failed", (job, error) => {
@@ -75,7 +79,14 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
       },
       // Webhook retries happen inside deliverOnce (bounded backoff); one queue
       // attempt is enough, and failures remain inspectable via delivery rows.
-      { connection: QUEUE_CONNECTION, concurrency: 5 }
+      // lockDuration spans the worst-case in-job budget (3 attempts x 10s
+      // timeout + backoff ~ 34s) so a legitimately slow send is never declared
+      // stalled and reclaimed beyond the row-level claim.
+      {
+        connection: QUEUE_CONNECTION,
+        concurrency: 5,
+        lockDuration: 60_000
+      }
     );
     this.deliveriesWorker.on("completed", () => this.health.deliveries.processed++);
     this.deliveriesWorker.on("failed", (job, error) => {
@@ -85,18 +96,63 @@ export class WorkerService implements OnModuleInit, OnModuleDestroy {
 
     this.health.running = true;
     this.logger.log("Workers started (events, deliveries)");
+
+    // Recover deliveries abandoned by a previous worker (crash mid-send),
+    // then sweep periodically. Bounded batch per sweep prevents storms.
+    const firstRecovery = setTimeout(() => {
+      void this.delivery.recoverAbandoned().catch((error) =>
+        this.logger.error(`Startup recovery failed: ${error instanceof Error ? error.message : error}`)
+      );
+    }, 5_000);
+    firstRecovery.unref?.();
+    this.recoveryTimer = setInterval(() => {
+      void this.delivery.recoverAbandoned().catch((error) =>
+        this.logger.error(`Recovery sweep failed: ${error instanceof Error ? error.message : error}`)
+      );
+    }, 5 * 60_000);
+    this.recoveryTimer.unref?.();
+  }
+
+  /** Queue backlog signals for the health endpoint. */
+  async queueBacklog(): Promise<{ events: { waiting: number; failed: number }; deliveries: { waiting: number; failed: number } } | null> {
+    try {
+      const [eventsWaiting, eventsFailed, deliveriesWaiting, deliveriesFailed] = await Promise.all([
+        this.eventsQueue.getWaitingCount(),
+        this.eventsQueue.getFailedCount(),
+        this.deliveriesQueue.getWaitingCount(),
+        this.deliveriesQueue.getFailedCount()
+      ]);
+      return {
+        events: { waiting: eventsWaiting, failed: eventsFailed },
+        deliveries: { waiting: deliveriesWaiting, failed: deliveriesFailed }
+      };
+    } catch {
+      return null; // Redis unreachable
+    }
   }
 
   getHealth(): WorkerHealth {
     return { ...this.health, events: { ...this.health.events }, deliveries: { ...this.health.deliveries } };
   }
 
-  /** Stops accepting jobs and waits for the active ones to settle. */
+  /** Stops accepting jobs and waits for the active ones within a bounded timeout. */
   async onModuleDestroy(): Promise<void> {
     this.health.running = false;
+    if (this.recoveryTimer) {
+      clearInterval(this.recoveryTimer);
+      this.recoveryTimer = undefined;
+    }
+    const deadline = Date.now() + this.recoveryTimeoutMs;
     for (const worker of [this.eventsWorker, this.deliveriesWorker]) {
       if (worker) {
-        await worker.close();
+        const remaining = deadline - Date.now();
+        await Promise.race([
+          worker.close(),
+          new Promise<void>((resolve) => {
+            const timer = setTimeout(resolve, Math.max(remaining, 0));
+            timer.unref?.();
+          })
+        ]);
       }
     }
     this.logger.log("Workers stopped gracefully");

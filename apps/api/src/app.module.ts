@@ -1,5 +1,5 @@
 import { MiddlewareConsumer, Module, NestModule } from "@nestjs/common";
-import { ThrottlerModule } from "@nestjs/throttler";
+import { ThrottlerModule, type ThrottlerStorage } from "@nestjs/throttler";
 import { AuditModule } from "./audit/audit.module";
 import { AuthModule } from "./auth/auth.module";
 import { CorrelationIdMiddleware } from "./common/correlation-id.middleware";
@@ -8,6 +8,7 @@ import { EventsModule } from "./events/events.module";
 import { HealthController } from "./health.controller";
 import { IssuesModule } from "./issues/issues.module";
 import { MetricsModule } from "./metrics/metrics.module";
+import { RateLimitModule, RATE_LIMIT_STORAGE } from "./rate-limit/rate-limit.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { ProjectsModule } from "./projects/projects.module";
 import { QueueModule } from "./queue/queue.module";
@@ -31,7 +32,16 @@ warnMissingEncryptionKey();
     WebhooksModule,
     // Only the worker process (DEBUGANY_WORKER=true) consumes queues.
     ...(env.workerEnabled ? [WorkerModule] : []),
-    ThrottlerModule.forRoot([{ ttl: 60_000, limit: 120 }])
+    RateLimitModule,
+    ThrottlerModule.forRootAsync({
+      inject: [RATE_LIMIT_STORAGE],
+      useFactory: (storage?: ThrottlerStorage) => ({
+        throttlers: [{ ttl: 60_000, limit: 120 }],
+        // When undefined (memory mode), the throttler falls back to its
+        // built-in per-process storage automatically.
+        storage
+      })
+    })
   ],
   controllers: [HealthController]
 })

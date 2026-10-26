@@ -1,14 +1,13 @@
-import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, Logger, NotFoundException, Optional } from "@nestjs/common";
 import { Agent, fetch as undiciFetch, type Dispatcher } from "undici";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { lookup as dnsLookup } from "node:dns";
 import { isIP } from "node:net";
-import { Prisma } from "@prisma/client";
 import type { Queue } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 import { decryptSecret } from "./crypto";
 import { assertPublicWebhookHost, isBlockedAddress, parseWebhookUrl } from "./ssrf";
-import { DELIVERIES_QUEUE_TOKEN } from "../queue/queue.module";
+import { DELIVERIES_QUEUE_TOKEN, deliveryJobId } from "../queue/queue.module";
 
 const MAX_REDIRECTS = 3;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -62,6 +61,16 @@ export class WebhookDeliveryService {
    * Delivers a pending delivery row. Called by the queue worker; safe to call
    * directly in tests. Delivery state (PENDING/DELIVERED/FAILED, attempts,
    * response status) is tracked on the row.
+   *
+   * Claiming: the row's `startedAt` is set conditionally (only while PENDING
+   * and not freshly claimed), so two workers can never send the same delivery
+   * concurrently. Attempt budgets are cumulative across recovery — recovery
+   * re-enqueues an abandoned delivery with the attempts already spent, so a
+   * crash-loop cannot produce unbounded retries.
+   *
+   * At-least-once: if the process crashes after the remote accepted the
+   * request but before local acknowledgement, the row stays PENDING and
+   * recovery re-sends; the receiver may observe a duplicate.
    */
   async deliverOnce(deliveryKey: string, options: DeliverOptions = {}): Promise<void> {
     const delivery = await this.prisma.webhookDelivery.findUnique({
@@ -70,30 +79,50 @@ export class WebhookDeliveryService {
     });
     if (!delivery) return;
     if (delivery.status !== "PENDING") return; // already delivered or final-failed
+
+    if (delivery.attempts >= MAX_ATTEMPTS) {
+      await this.prisma.webhookDelivery.update({
+        where: { id: delivery.id },
+        data: { status: "FAILED", error: "Attempt budget exhausted", startedAt: null }
+      });
+      return;
+    }
+
+    // Claim: only one worker may hold a fresh claim on this delivery.
+    const claimed = await this.prisma.webhookDelivery.updateMany({
+      where: {
+        id: delivery.id,
+        status: "PENDING",
+        OR: [{ startedAt: null }, { startedAt: { lt: this.staleClaimCutoff() } }]
+      },
+      data: { startedAt: new Date() }
+    });
+    if (claimed.count === 0) return; // another worker owns this delivery
+
     if (!delivery.endpoint.enabled) {
       await this.prisma.webhookDelivery.update({
         where: { id: delivery.id },
-        data: { status: "FAILED", error: "Endpoint disabled" }
+        data: { status: "FAILED", error: "Endpoint disabled", startedAt: null }
       });
       return;
     }
 
     const secret = decryptSecret(delivery.endpoint.secretEnc);
     const body = JSON.stringify(delivery.payload);
-    const maxAttempts = options.attempts ?? MAX_ATTEMPTS;
+    const budget = Math.min(options.attempts ?? MAX_ATTEMPTS, MAX_ATTEMPTS) - delivery.attempts;
     const backoff = options.backoffMs ?? BACKOFF_MS;
 
     let lastError: string | undefined;
     let lastStatus: number | undefined;
 
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    for (let attempt = 1; attempt <= budget; attempt++) {
       try {
         const status = await this.sendSigned(delivery.endpoint.url, body, secret);
         lastStatus = status;
         if (status >= 200 && status < 300) {
           await this.prisma.webhookDelivery.update({
             where: { id: delivery.id },
-            data: { status: "DELIVERED", attempts: attempt, responseStatus: status, deliveredAt: new Date() }
+            data: { status: "DELIVERED", attempts: { increment: 1 }, responseStatus: status, deliveredAt: new Date(), startedAt: null }
           });
           return;
         }
@@ -101,20 +130,71 @@ export class WebhookDeliveryService {
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
       }
-      if (attempt < maxAttempts) {
+      await this.prisma.webhookDelivery.update({
+        where: { id: delivery.id },
+        data: { attempts: { increment: 1 } }
+      });
+      if (attempt < budget) {
         await new Promise((resolve) => setTimeout(resolve, backoff[attempt - 1] ?? backoff[backoff.length - 1]));
       }
     }
 
-    await this.prisma.webhookDelivery.update({
-      where: { id: delivery.id },
-      data: {
-        status: "FAILED",
-        attempts: maxAttempts,
-        responseStatus: lastStatus ?? null,
-        error: lastError?.slice(0, 500)
-      }
+    if (delivery.attempts + budget >= MAX_ATTEMPTS) {
+      // Attempt budget exhausted: terminal failure, inspectable in the UI.
+      await this.prisma.webhookDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "FAILED",
+          responseStatus: lastStatus ?? null,
+          error: lastError?.slice(0, 500),
+          startedAt: null
+        }
+      });
+    } else {
+      // Custom smaller budget used up but global budget remains: leave
+      // PENDING (claim released) so recovery can retry with fresh backoff.
+      await this.prisma.webhookDelivery.update({
+        where: { id: delivery.id },
+        data: { responseStatus: lastStatus ?? null, error: lastError?.slice(0, 500), startedAt: null }
+      });
+    }
+  }
+
+  private staleClaimCutoff(): Date {
+    // A claim older than two request timeouts plus a margin is abandoned.
+    return new Date(Date.now() - (REQUEST_TIMEOUT_MS * 2 + 60_000));
+  }
+
+  /**
+   * Re-enqueues abandoned deliveries: PENDING rows that were never claimed or
+   * whose claim has gone stale (worker crashed mid-send), bounded to
+   * `limit` rows per sweep and the global attempt budget. Called once after
+   * worker startup and periodically; the dedupe-key job id and the delivery
+   * claim prevent concurrent recovery processes from double-sending.
+   */
+  async recoverAbandoned(limit = 50): Promise<number> {
+    const staleCutoff = this.staleClaimCutoff();
+    const candidates = await this.prisma.webhookDelivery.findMany({
+      where: {
+        status: "PENDING",
+        attempts: { lt: MAX_ATTEMPTS },
+        OR: [{ startedAt: null }, { startedAt: { lt: staleCutoff } }]
+      },
+      select: { dedupeKey: true },
+      orderBy: { createdAt: "asc" },
+      take: limit
     });
+    for (const candidate of candidates) {
+      // Same job id dedupes while a waiting job exists; claim in deliverOnce
+      // is the authoritative concurrency guard.
+      await this.deliveriesQueue
+        .add("deliver", { deliveryKey: candidate.dedupeKey }, { jobId: deliveryJobId(candidate.dedupeKey) })
+        .catch(() => undefined);
+    }
+    if (candidates.length > 0) {
+      this.logger.log(`Recovery re-enqueued ${candidates.length} abandoned delivery(ies)`);
+    }
+    return candidates.length;
   }
 
   /** Computes the signature header exactly as a receiver would verify it. */
@@ -215,16 +295,42 @@ export class WebhookDeliveryService {
     return agent;
   }
 
-  /** Queues redelivery of failed deliveries (operator action via API later). */
-  async requeueFailed(deliveryId: string, projectId: string): Promise<{ requeued: boolean }> {
-    const delivery = await this.prisma.webhookDelivery.findFirst({
-      where: { id: deliveryId, projectId, status: "FAILED" },
+  /**
+   * Operator requeue of a failed delivery: grants a fresh attempt budget.
+   * Only FAILED rows are eligible; PENDING/DELIVERED rows are rejected with a
+   * conflict so double-clicks and concurrent requeues cannot double-send.
+   * The reset is conditional on `status: "FAILED"` in the database, so of two
+   * racing calls at most one of them can succeed.
+   */
+  async requeueFailed(projectId: string, webhookId: string, deliveryId: string): Promise<{ requeued: boolean }> {
+    const reset = await this.prisma.webhookDelivery.updateMany({
+      where: { id: deliveryId, projectId, endpointId: webhookId, status: "FAILED" },
+      data: { status: "PENDING", attempts: 0, error: null, startedAt: null }
+    });
+    if (reset.count === 0) {
+      const existing = await this.prisma.webhookDelivery.findFirst({
+        where: { id: deliveryId, projectId, endpointId: webhookId },
+        select: { status: true }
+      });
+      if (!existing) {
+        throw new NotFoundException("Delivery not found.");
+      }
+      if (existing.status === "PENDING") {
+        throw new ConflictException("Delivery is already pending delivery.");
+      }
+      throw new ConflictException("Only FAILED deliveries can be requeued.");
+    }
+    const delivery = await this.prisma.webhookDelivery.findUniqueOrThrow({
+      where: { id: deliveryId },
       select: { dedupeKey: true }
     });
-    if (!delivery) {
-      throw new Prisma.PrismaClientKnownRequestError("Delivery not found", { code: "P2025", clientVersion: "x" });
-    }
-    await this.deliveriesQueue.add("deliver", { deliveryKey: delivery.dedupeKey });
+    await this.deliveriesQueue.add(
+      "deliver",
+      { deliveryKey: delivery.dedupeKey },
+      // Unique per invocation: an operator requeue must never be swallowed by
+      // a stale waiting job for the same delivery.
+      { jobId: `${deliveryJobId(delivery.dedupeKey)}-${Date.now()}` }
+    );
     return { requeued: true };
   }
 

@@ -44,6 +44,18 @@ export const EVENTS_QUEUE_TOKEN = "EVENTS_QUEUE";
 export const DELIVERIES_QUEUE_TOKEN = "DELIVERIES_QUEUE";
 export const QUEUE_CONNECTION = connection;
 
+/**
+ * Deterministic, BullMQ-safe job id for a delivery lookup key.
+ *
+ * BullMQ rejects custom job ids containing ':' when `split(':').length !== 3`.
+ * Delivery dedupe keys are colon-laden (`rule:issue:bucket`), so the unsanitized
+ * id is rejected at enqueue time. This helper keeps the same uniqueness and
+ * waiting-job deduplication without the forbidden separator.
+ */
+export function deliveryJobId(deliveryKey: string): string {
+  return `delivery-${deliveryKey.replace(/:/g, "-")}`;
+}
+
 @Global()
 @Module({
   imports: [PrismaModule],
