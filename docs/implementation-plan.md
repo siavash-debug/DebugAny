@@ -175,6 +175,38 @@ Data model (`apps/api/prisma/schema.prisma`):
   no email channel; webhook targets must resolve DNS at creation; audit log
   has no viewer; no delivery requeue API yet.
 
+### Phase 8 — Reliability hardening (delivery recovery) ✅ (2026-10-25/26)
+- Delivery claim marker: `WebhookDelivery.startedAt` (migration
+  `20261025103338_delivery_claim_marker`, index `(status, startedAt)`).
+  `deliverOnce` claims the row conditionally (only while PENDING and not
+  freshly claimed), so two workers can never send the same delivery
+  concurrently; claims older than 2× request timeout + 60s are stale.
+- Worker recovery: after startup (5s) and every 5 minutes a bounded sweep
+  re-enqueues abandoned deliveries (PENDING, unclaimed or stale claim,
+  attempts < budget). Worker `/v1/worker/health` now reports queue backlog
+  counts; graceful shutdown is bounded to 10s so a stuck job cannot block
+  process exit.
+- Attempt budgets are cumulative across recovery: a crash-loop cannot produce
+  unbounded retries; exhausted budgets become terminal FAILED rows
+  ("Attempt budget exhausted") inspectable in the UI, and operator requeue
+  (service-level `requeueFailed`) grants a fresh budget. The requeue route is
+  not wired to an HTTP endpoint yet.
+- Fixed a silently lossy bug: **alert-triggered webhook deliveries were never
+  enqueued**. BullMQ rejects custom job ids containing ':' (unless the id has
+  exactly 3 segments) and the id was `delivery:<rule>:<issue>:<bucket>`; the
+  error was swallowed by the alert-evaluation catch. Integration tests
+  asserted only the DB row, so CI stayed green. All delivery job ids now go
+  through `deliveryJobId()` (colon-free, deterministic) — alert evaluation,
+  recovery sweep, and operator requeue.
+- Fixed the phase-6 integration test harness (shared webhook receiver was
+  closed by its owning suite before the later suites ran, breaking 6 tests);
+  the receiver is now file-scoped.
+- Remaining hardening work: Redis-backed rate limiting for multi-instance
+  APIs, backup/restore runbook, structured-log redaction audit, failure
+  testing (kill worker mid-delivery), stalled-job handling via the BullMQ
+  stalled-check configuration, HTTP route for operator requeue, delivery
+  history surfacing `startedAt`.
+
 ### Phase 6 — (previous notes)
 - BullMQ worker consuming ingestion (queue-then-persist with bounded retries and
   dead-letter handling) once synchronous ingestion proves insufficient; alert

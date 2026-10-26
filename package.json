@@ -30,5 +30,8 @@
     "test:sdk": "npm run test --workspace @debugany/sdk",
     "typecheck:sdk": "npm run typecheck --workspace @debugany/sdk",
     "build": "npm run build:api && npm run build:web && npm run build:sdk"
+  },
+  "overrides": {
+    "body-parser": "^1.20.9"
   }
 }

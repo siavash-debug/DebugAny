@@ -133,10 +133,12 @@ model WebhookDelivery {
   attempts      Int            @default(0)
   responseStatus Int?
   error         String?        @db.VarChar(500)
+  startedAt     DateTime?
   createdAt     DateTime       @default(now())
   deliveredAt   DateTime?
 
   @@index([endpointId, createdAt])
+  @@index([status, startedAt])
 }
 
 model ProcessedJob {

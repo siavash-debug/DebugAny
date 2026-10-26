@@ -31,6 +31,51 @@ function httpBody(req: IncomingMessage): Promise<string> {
   });
 }
 
+// Shared receiver + fixtures used by both Phase 6 suites.
+const secrets = new Map<string, string>();
+const receiver: { requests: Array<{ headers: Record<string, string>; body: string }> } = { requests: [] };
+let receiverMode: "ok" | "fail" | "flaky" = "ok";
+let serverUrl = "";
+let server: Server;
+
+async function startReceiver(): Promise<void> {
+  server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const body = await httpBody(req);
+    const prior = receiver.requests.filter((r) => r.body === body).length;
+    receiver.requests.push({ headers: req.headers as Record<string, string>, body });
+    if (receiverMode === "fail") {
+      res.writeHead(500).end("nope");
+    } else if (receiverMode === "flaky" && prior < 2) {
+      res.writeHead(500).end("flaky");
+    } else {
+      res.writeHead(200).end("ok");
+    }
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      serverUrl = `http://127.0.0.1:${port}/hook`;
+      resolve();
+    });
+  });
+}
+
+// The local webhook receiver is shared by both phase 6 integration suites.
+// Start it once for the whole file (top-level hook), so suite boundaries do
+// not close the server while later suites still deliver webhooks.
+beforeAll(() => startReceiver(), 10_000);
+afterAll(async () => {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+});
+
+const moduleScopedDescribe = databaseUrl ? describe : describe.skip;
+moduleScopedDescribe("phase 6 shared receiver", () => {
+  it("starts the local receiver", () => {
+    expect(serverUrl).toContain("127.0.0.1");
+  });
+});
+
 describeIntegration("phase 6: alerts, webhooks, idempotency (integration)", () => {
   let prisma: PrismaService;
   let projects: ProjectsService;
@@ -42,12 +87,6 @@ describeIntegration("phase 6: alerts, webhooks, idempotency (integration)", () =
   let bob: TestUser;
   let project: { id: string; name: string; slug: string };
   let deliveriesQueue: Queue;
-  let server: Server;
-  let serverUrl: string;
-  const secrets = new Map<string, string>();
-  const receiver: { requests: Array<{ headers: Record<string, string>; body: string }> } = { requests: [] };
-  let receiverMode: "ok" | "fail" | "flaky" = "ok";
-
   beforeAll(async () => {
     prisma = new PrismaService();
     const audit = new AuditService(prisma);
@@ -75,22 +114,6 @@ describeIntegration("phase 6: alerts, webhooks, idempotency (integration)", () =
       slug: `p6-${Math.random().toString(36).slice(2, 10)}`
     });
 
-    server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-      const body = await httpBody(req);
-      const prior = receiver.requests.filter((r) => r.body === body).length;
-      receiver.requests.push({ headers: req.headers as Record<string, string>, body });
-      if (receiverMode === "fail") {
-        res.writeHead(500).end("nope");
-      } else if (receiverMode === "flaky" && prior < 2) {
-        res.writeHead(500).end("flaky");
-      } else {
-        res.writeHead(200).end("ok");
-      }
-    });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    const address = server.address();
-    const port = typeof address === "object" && address ? address.port : 0;
-    serverUrl = `http://127.0.0.1:${port}/hook`;
   });
 
   afterAll(async () => {
@@ -98,7 +121,6 @@ describeIntegration("phase 6: alerts, webhooks, idempotency (integration)", () =
     await prisma.user.deleteMany({ where: { email: { startsWith: "p6-" } } }).catch(() => undefined);
     await deliveriesQueue.close().catch(() => undefined);
     await prisma.$disconnect();
-    await new Promise<void>((resolve) => server.close(() => resolve()));
   });
 
   function ingest(message: string, errorType?: string) {
@@ -192,10 +214,16 @@ describeIntegration("phase 6: alerts, webhooks, idempotency (integration)", () =
     const row = await prisma.webhookDelivery.findFirstOrThrow({ where: { alertRuleId: rule.id } });
     expect(row.dedupeKey).toBe(`${rule.id}:${first.issue.id}:1`);
 
+    // Regression: the trigger must actually enqueue the delivery into BullMQ.
+    // The old job id contained a colon and BullMQ rejected it silently, so
+    // alert-triggered rows stayed PENDING forever in production.
+    const queued = await deliveriesQueue.getJobs(["waiting", "active", "prioritized"], 0, 100);
+    expect(queued.map((job) => (job.data as { deliveryKey?: string }).deliveryKey)).toContain(row.dedupeKey);
+
     await delivery.deliverOnce(row.dedupeKey);
-    expect(receiver.requests).toHaveLength(1);
     const delivered = await prisma.webhookDelivery.findUniqueOrThrow({ where: { dedupeKey: row.dedupeKey } });
-    expect(delivered.status).toBe("DELIVERED");
+    expect(`${delivered.status}: ${delivered.error ?? "no error"}`).toBe("DELIVERED: no error");
+    expect(receiver.requests).toHaveLength(1);
     expect(delivered.attempts).toBe(1);
 
     const signature = receiver.requests[0].headers["x-debugany-signature"] as string;
@@ -249,12 +277,13 @@ describeIntegration("phase 6: alerts, webhooks, idempotency (integration)", () =
         payload: { type: "alert.triggered" } as object
       }
     });
-    await delivery.deliverOnce(failing.dedupeKey, { attempts: 2, backoffMs: [10, 10] });
+    await delivery.deliverOnce(failing.dedupeKey, { backoffMs: [10, 10, 10] });
     const failed = await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: failing.id } });
     expect(failed.status).toBe("FAILED");
     expect(failed.responseStatus).toBe(500);
     expect(failed.error).toContain("500");
-    expect(receiver.requests).toHaveLength(2);
+    expect(failed.attempts).toBe(3);
+    expect(receiver.requests).toHaveLength(3);
     receiverMode = "ok";
     await webhooks.delete(project.id, alice.user.id, hook.id);
   });
@@ -279,5 +308,139 @@ describeIntegration("phase 6: alerts, webhooks, idempotency (integration)", () =
     expect((await prisma.alertRule.findUniqueOrThrow({ where: { id: rule.id } })).lastTriggeredAt).not.toBeNull();
 
     await alerts.delete(project.id, alice.user.id, rule.id);
+  });
+});
+
+describeIntegration("phase 6: delivery recovery (integration)", () => {
+  let prisma: PrismaService;
+  let projects: ProjectsService;
+  let webhooks: WebhooksService;
+  let delivery: WebhookDeliveryService;
+  let alice: TestUser;
+  let project: { id: string; name: string; slug: string };
+  let hook: { id: string; signingSecret: string };
+  let deliveriesQueue: Queue;
+
+  beforeAll(async () => {
+    prisma = new PrismaService();
+    const audit = new AuditService(prisma);
+    projects = new ProjectsService(prisma, audit);
+    deliveriesQueue = new Queue("deliveries", { connection: { url: redisUrl } });
+    class TestWebhooks extends WebhooksService {
+      override async checkUrl(): Promise<void> {
+        return;
+      }
+    }
+    webhooks = new TestWebhooks(prisma, projects, audit);
+    delivery = new WebhookDeliveryService(prisma, deliveriesQueue, { urlCheck: async () => undefined });
+    alice = await createUser(prisma, "p6-recover");
+    project = await projects.create(alice.user, {
+      name: "Recovery",
+      slug: `p6r-${Math.random().toString(36).slice(2, 10)}`
+    });
+    hook = await webhooks.create(project.id, alice.user.id, { url: serverUrl });
+    secrets.set(hook.id, hook.signingSecret);
+  });
+
+  afterAll(async () => {
+    await prisma.project.delete({ where: { id: project.id } }).catch(() => undefined);
+    await prisma.user.deleteMany({ where: { email: { startsWith: "p6-" } } }).catch(() => undefined);
+    await deliveriesQueue.close().catch(() => undefined);
+    await prisma.$disconnect();
+  });
+
+  function makeDelivery(dedupeKey: string, extra: Record<string, unknown> = {}) {
+    return prisma.webhookDelivery.create({
+      data: {
+        endpointId: hook.id,
+        projectId: project.id,
+        dedupeKey,
+        payload: { type: "alert.triggered" } as object,
+        ...extra
+      }
+    });
+  }
+
+  it("recovers an abandoned delivery (stale claim) via recoverAbandoned", async () => {
+    receiver.requests.length = 0;
+    receiverMode = "ok";
+    const row = await makeDelivery(`recover-${randomUUID()}`, {
+      startedAt: new Date(Date.now() - 10 * 60_000) // stale claim: worker crashed mid-send
+    });
+    const requeued = await delivery.recoverAbandoned(50);
+    expect(requeued).toBeGreaterThanOrEqual(1);
+
+    // The enqueued job exists; simulate the worker by delivering directly.
+    const recoveryJobs = await deliveriesQueue.getJobs(["waiting", "active", "prioritized"], 0, 100);
+    expect(recoveryJobs.map((job) => (job.data as { deliveryKey?: string }).deliveryKey)).toContain(row.dedupeKey);
+    await delivery.deliverOnce(row.dedupeKey);
+    const after = await prisma.webhookDelivery.findUniqueOrThrow({ where: { dedupeKey: row.dedupeKey } });
+    if (after.status !== "DELIVERED") {
+      throw new Error(`recovery delivery failed: ${after.error ?? "?"}`);
+    }
+    expect(after.status).toBe("DELIVERED");
+    expect(receiver.requests).toHaveLength(1);
+  });
+
+  it("does not recover fresh claims or exhausted deliveries", async () => {
+    receiver.requests.length = 0;
+    receiverMode = "fail";
+    const fresh = await makeDelivery(`fresh-${randomUUID()}`, { startedAt: new Date() }); // in-progress
+    const exhausted = await makeDelivery(`exhausted-${randomUUID()}`, { attempts: 3, startedAt: new Date(Date.now() - 10 * 60_000) });
+
+    await delivery.recoverAbandoned(50);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect((await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: fresh.id } })).status).toBe("PENDING");
+    // exhausted budget becomes terminal on the next deliverOnce touch, not via recovery
+    await delivery.deliverOnce(exhausted.dedupeKey);
+    const terminal = await prisma.webhookDelivery.findUniqueOrThrow({ where: { id: exhausted.id } });
+    expect(terminal.status).toBe("FAILED");
+    expect(terminal.error).toContain("budget");
+    expect(receiver.requests).toHaveLength(0);
+    receiverMode = "ok";
+  });
+
+  it("prevents concurrent delivery of the same row via the claim", async () => {
+    receiver.requests.length = 0;
+    receiverMode = "ok";
+    const row = await makeDelivery(`concurrent-${randomUUID()}`);
+
+    // First caller claims and holds the delivery (simulated by not finishing);
+    // a second concurrent call must observe the fresh claim and skip.
+    const first = delivery.deliverOnce(row.dedupeKey, { backoffMs: [10] });
+    await new Promise((resolve) => setTimeout(resolve, 50)); // claim taken, send in flight
+    await delivery.deliverOnce(row.dedupeKey);
+    await first;
+
+    expect((await prisma.webhookDelivery.findUniqueOrThrow({ where: { dedupeKey: row.dedupeKey } })).status).toBe("DELIVERED");
+    expect(receiver.requests).toHaveLength(1);
+  });
+
+  it("keeps attempt budgets cumulative across recovery", async () => {
+    receiver.requests.length = 0;
+    receiverMode = "fail";
+    const row = await makeDelivery(`budget-${randomUUID()}`, { attempts: 2 }); // one attempt left
+
+    await delivery.deliverOnce(row.dedupeKey, { backoffMs: [10, 10] });
+    const after = await prisma.webhookDelivery.findUniqueOrThrow({ where: { dedupeKey: row.dedupeKey } });
+    expect(after.status).toBe("FAILED");
+    expect(after.attempts).toBe(3); // 2 prior + 1 final attempt, then terminal
+    expect(receiver.requests).toHaveLength(1);
+    receiverMode = "ok";
+  });
+
+  it("operator requeue grants a fresh budget", async () => {
+    receiver.requests.length = 0;
+    receiverMode = "ok";
+    const row = await makeDelivery(`requeue-${randomUUID()}`, { status: "FAILED" as never, attempts: 3, error: "old" });
+    await delivery.requeueFailed(row.id, project.id);
+    const reset = await prisma.webhookDelivery.findUniqueOrThrow({ where: { dedupeKey: row.dedupeKey } });
+    expect(reset.status).toBe("PENDING");
+    expect(reset.attempts).toBe(0);
+
+    await delivery.deliverOnce(row.dedupeKey);
+    expect((await prisma.webhookDelivery.findUniqueOrThrow({ where: { dedupeKey: row.dedupeKey } })).status).toBe("DELIVERED");
+    expect(receiver.requests).toHaveLength(1);
   });
 });

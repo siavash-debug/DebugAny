@@ -3,6 +3,20 @@ import { describe, expect, it } from "vitest";
 import { isBlockedAddress, parseWebhookUrl } from "../src/webhooks/ssrf";
 import { validateRuleConfig } from "../src/alerts/dto/alert-rule.dto";
 import { WebhookDeliveryService } from "../src/webhooks/delivery.service";
+import { deliveryJobId } from "../src/queue/queue.module";
+
+describe("BullMQ job id sanity", () => {
+  it("produces custom job ids BullMQ accepts for delivery dedupe keys", () => {
+    const key = `${Date.now()}:-${Math.random()}:${Math.random()}:1`;
+    const jobId = deliveryJobId(key);
+    // BullMQ rejects ids containing ':' unless split(':').length === 3.
+    const segments = jobId.split(":");
+    expect(jobId.startsWith("delivery-")).toBe(true);
+    expect(segments.length === 1 || segments.length === 3).toBe(true);
+    // Same key always maps to the same waiting-job dedupe id.
+    expect(deliveryJobId(key)).toBe(jobId);
+  });
+});
 
 describe("SSRF address blocklist", () => {
   const blocked = [

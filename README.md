@@ -22,7 +22,7 @@ The repository now contains:
 - Web: Next.js, React, TypeScript
 - API: NestJS, TypeScript, REST
 - Database: PostgreSQL, Prisma
-- Background jobs (planned): Redis and BullMQ
+- Background jobs: Redis and BullMQ
 - Local infrastructure: Docker Compose
 - Automation: GitHub Actions
 

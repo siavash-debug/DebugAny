@@ -7,7 +7,13 @@ export class WorkerController {
   constructor(private readonly worker: WorkerService) {}
 
   @Get("health")
-  health() {
-    return { status: "ok", service: "debugany-worker", ...this.worker.getHealth(), timestamp: new Date().toISOString() };
+  async health() {
+    return {
+      status: "ok",
+      service: "debugany-worker",
+      ...this.worker.getHealth(),
+      queueBacklog: await this.worker.queueBacklog(),
+      timestamp: new Date().toISOString()
+    };
   }
 }

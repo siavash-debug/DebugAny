@@ -4,7 +4,7 @@ import type { Queue } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
 import type { AuthenticatedUser } from "../auth/auth.service";
-import { DELIVERIES_QUEUE_TOKEN, DELIVERIES_QUEUE } from "../queue/queue.module";
+import { DELIVERIES_QUEUE_TOKEN, DELIVERIES_QUEUE, deliveryJobId } from "../queue/queue.module";
 import { CreateAlertRuleDto, UpdateAlertRuleDto, validateRuleConfig, type AlertRuleConfig } from "./dto/alert-rule.dto";
 
 const RULE_SELECT = {
@@ -185,7 +185,7 @@ export class AlertsService {
             await this.deliveriesQueue.add(
               "deliver",
               { deliveryKey: dedupeKey },
-              { jobId: `delivery:${dedupeKey}` }
+              { jobId: deliveryJobId(dedupeKey) }
             );
           } catch (error) {
             if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
